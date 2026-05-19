@@ -7,6 +7,7 @@ const INITIAL_STATE = {
   screen: 'setup',
   personName: '',
   lang: 'en-US',
+  engine: 'browser',
   sessionStart: null,
   transcript: [],
   choices: [],
@@ -20,12 +21,13 @@ const AFFECTION_DELTA = { kind: 3, witty: 2, assertive: 1, cold: -2 }
 export default function App() {
   const [state, setState] = useState(INITIAL_STATE)
 
-  const startSession = useCallback((name, lang = 'en-US') => {
+  const startSession = useCallback((name, lang = 'en-US', engine = 'browser') => {
     setState({
       ...INITIAL_STATE,
       screen: 'hud',
       personName: name,
       lang,
+      engine,
       sessionStart: Date.now(),
     })
   }, [])
@@ -69,6 +71,7 @@ export default function App() {
         <HUD
           personName={state.personName}
           lang={state.lang}
+          engine={state.engine}
           sessionStart={state.sessionStart}
           transcript={state.transcript}
           affection={state.affection}

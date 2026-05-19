@@ -4,6 +4,7 @@ import { useSpeech } from '../hooks/useSpeech'
 import { useTimer } from '../hooks/useTimer'
 import { useClaudeOptions } from '../hooks/useClaudeOptions'
 import { useMicLevel } from '../hooks/useMicLevel'
+import { useLocalWhisper } from '../hooks/useLocalWhisper'
 import CameraPanel from './CameraPanel'
 import TranscriptPanel from './TranscriptPanel'
 import OptionsBar from './OptionsBar'
@@ -12,6 +13,7 @@ import AffectionBar from './AffectionBar'
 export default function HUD({
   personName,
   lang = 'en-US',
+  engine = 'browser',
   sessionStart,
   transcript,
   affection,
@@ -53,11 +55,23 @@ export default function HUD({
   )
 
   const { videoRef, ready: camReady, error: camError } = useCamera(true)
-  const { listening, interim, error: speechError, noSpeechStreak, stages } = useSpeech({
-    active: true,
+  
+  // Use the selected speech engine
+  const browserSpeech = useSpeech({
+    active: engine === 'browser',
     lang,
     onFinalResult: handleSpeech,
   })
+
+  const whisperSpeech = useLocalWhisper({
+    active: engine === 'whisper',
+    lang,
+    onFinalResult: handleSpeech,
+  })
+
+  const { listening, interim, error: speechError, noSpeechStreak, stages } = 
+    engine === 'whisper' ? whisperSpeech : browserSpeech
+
   const { level: micLevel, hasAudio: micHasAudio, error: micError } = useMicLevel(true)
 
   // How long the recognizer has detected speech but produced no result —

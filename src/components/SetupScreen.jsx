@@ -13,12 +13,18 @@ export const LANGUAGES = [
   { code: 'pt-BR', label: 'Português (BR)' },
 ]
 
+export const ENGINES = [
+  { id: 'browser', label: 'Browser (Web Speech API)' },
+  { id: 'whisper', label: 'Local Whisper (Python Backend)' },
+]
+
 export default function SetupScreen({ onStart }) {
   const [name, setName] = useState('')
   const [lang, setLang] = useState('en-US')
+  const [engine, setEngine] = useState('browser')
 
   const handleStart = () => {
-    if (name.trim()) onStart(name.trim(), lang)
+    if (name.trim()) onStart(name.trim(), lang, engine)
   }
 
   return (
@@ -62,6 +68,27 @@ export default function SetupScreen({ onStart }) {
               <option key={l.code} value={l.code}>{l.label}</option>
             ))}
           </select>
+        </div>
+
+        <div className="form-field">
+          <label className="form-label" htmlFor="engine-select">
+            Speech Engine
+          </label>
+          <select
+            id="engine-select"
+            className="form-input"
+            value={engine}
+            onChange={e => setEngine(e.target.value)}
+          >
+            {ENGINES.map(e => (
+              <option key={e.id} value={e.id}>{e.label}</option>
+            ))}
+          </select>
+          {engine === 'whisper' && (
+            <p className="setup-note" style={{ marginTop: '8px', color: 'var(--accent2)' }}>
+              Requires Python server running on port 8000
+            </p>
+          )}
         </div>
 
         <button
