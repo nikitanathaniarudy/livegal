@@ -1287,3 +1287,68 @@ header {
   width: 100%;
   overflow: visible;
 }
+
+/* ══ Network / graph view ═════════════════════════════════════════════ */
+
+.network-header {
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 28px 32px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.network-title {
+  font-size: 10px;
+  color: var(--ink-dim);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.network-legend {
+  display: flex;
+  gap: 16px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.legend-item {
+  opacity: 0.7;
+}
+
+.graph-wrap {
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 24px 40px;
+  height: 560px;
+  position: relative;
+}
+
+.graph-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--paper2);
+}
+
+.graph-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--ink-dim);
+  font-size: 13px;
+  line-height: 1.8;
+  pointer-events: none;
+}
+
+.graph-empty.hidden { display: none; }

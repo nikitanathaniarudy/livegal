@@ -2,13 +2,15 @@
  * GalGameDB — wraps IndexedDB with a clean async API.
  * No external dependencies.
  *
- * Schema (v1):
- *   people        { id, name, createdAt, lastSeen, totalAffection, conversationCount }
+ * Schema (v3):
+ *   people        { id, name, faceDescriptor, createdAt, lastSeen, totalAffection, conversationCount }
  *   conversations { id, personId, startedAt, endedAt, exchanges[], finalAffection }
+ *   memories      { id, personId, said, text, label, cls, embedding, timestamp }
+ *   relationships { id, fromPersonId, fromName, toName, relationship, category, context, timestamp }
  */
 
 const DB_NAME    = 'galgame-db';
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 
 export class GalGameDB {
   constructor() {
@@ -32,6 +34,18 @@ export class GalGameDB {
         if (!db.objectStoreNames.contains('conversations')) {
           const cs = db.createObjectStore('conversations', { keyPath: 'id', autoIncrement: true });
           cs.createIndex('personId', 'personId', { unique: false });
+        }
+
+        // v2: persistent RAG memory per person
+        if (!db.objectStoreNames.contains('memories')) {
+          const ms = db.createObjectStore('memories', { keyPath: 'id', autoIncrement: true });
+          ms.createIndex('personId', 'personId', { unique: false });
+        }
+
+        // v3: relationship graph edges
+        if (!db.objectStoreNames.contains('relationships')) {
+          const rs = db.createObjectStore('relationships', { keyPath: 'id', autoIncrement: true });
+          rs.createIndex('fromPersonId', 'fromPersonId', { unique: false });
         }
       };
 
@@ -72,24 +86,37 @@ export class GalGameDB {
   }
 
   async deletePerson(id) {
-    // Delete all conversations for this person first
-    const convs = await this.getConversationsForPerson(id);
-    const tx = this._db.transaction(['people', 'conversations'], 'readwrite');
-    const personStore = tx.objectStore('people');
-    const convStore = tx.objectStore('conversations');
+    const person = await this.getPerson(id);
+    const tx = this._db.transaction(
+      ['people', 'conversations', 'memories', 'relationships'],
+      'readwrite'
+    );
 
-    convs.forEach(c => convStore.delete(c.id));
-    personStore.delete(id);
+    const people = tx.objectStore('people');
+    const conversations = tx.objectStore('conversations').index('personId');
+    const memories = tx.objectStore('memories').index('personId');
+    const relationshipsStore = tx.objectStore('relationships');
+    const relationships = relationshipsStore.index('fromPersonId');
 
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    people.delete(id);
+    this._deleteByIndex(conversations, id);
+    this._deleteByIndex(memories, id);
+    this._deleteByIndex(relationships, id);
+
+    if (person?.name) {
+      relationshipsStore.openCursor().onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (!cursor) return;
+        if (cursor.value.toName === person.name) cursor.delete();
+        cursor.continue();
+      };
+    }
+
+    return this._txDone(tx);
   }
 
   // ── Conversations ────────────────────────────────────────────────
 
-  /** Returns all conversations for a person, newest first. */
   async getConversationsForPerson(personId) {
     const all = await this._getAllByIndex('conversations', 'personId', personId);
     return all.sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
@@ -107,6 +134,42 @@ export class GalGameDB {
       exchanges:      [...exchanges],
       finalAffection,
     });
+  }
+
+  // ── Memories (persistent RAG) ────────────────────────────────────
+
+  saveMemory(personId, exchange, embedding) {
+    return this._add('memories', {
+      personId,
+      said:      exchange.said,
+      text:      exchange.text,
+      label:     exchange.label,
+      cls:       exchange.cls,
+      embedding,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  getMemoriesForPerson(personId) {
+    return this._getAllByIndex('memories', 'personId', personId);
+  }
+
+  // ── Relationships (network graph) ────────────────────────────────
+
+  saveRelationship(fromPersonId, fromName, toName, relationship, category, context) {
+    return this._add('relationships', {
+      fromPersonId,
+      fromName,
+      toName,
+      relationship,
+      category,
+      context,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  getAllRelationships() {
+    return this._getAll('relationships');
   }
 
   // ── Low-level helpers ────────────────────────────────────────────
@@ -161,6 +224,23 @@ export class GalGameDB {
       const req   = index.getAll(value);
       req.onsuccess = () => resolve(req.result);
       req.onerror   = () => reject(req.error);
+    });
+  }
+
+  _deleteByIndex(index, value) {
+    index.openCursor(IDBKeyRange.only(value)).onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (!cursor) return;
+      cursor.delete();
+      cursor.continue();
+    };
+  }
+
+  _txDone(tx) {
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
     });
   }
 }

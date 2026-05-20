@@ -6,8 +6,13 @@ import { OLLAMA_URL, RESPONSE_TYPES } from './config.js';
  * @param {string} model - Ollama model name (e.g. 'llama3.2')
  * @returns {Promise<Array<{label: string, text: string}>>}
  */
-export async function fetchOptions(said, model) {
-  const prompt = buildPrompt(said);
+/**
+ * @param {string} said
+ * @param {string} model
+ * @param {Array}  context - relevant past exchanges from RAG (may be empty)
+ */
+export async function fetchOptions(said, model, context = []) {
+  const prompt = buildPrompt(said, context);
 
   const res = await fetch(OLLAMA_URL, {
     method: 'POST',
@@ -30,13 +35,21 @@ export async function fetchOptions(said, model) {
   return options;
 }
 
-function buildPrompt(said) {
+function buildPrompt(said, context) {
   const labels = RESPONSE_TYPES.map(t => t.label).join(', ');
-  return `You are generating response options for a real-life visual novel / galgame simulator.
 
+  const contextBlock = context.length
+    ? `\nRelevant past exchanges for context:\n${
+        context.map(c =>
+          `- They said: "${c.said.replace(/"/g, "'")}" → You responded ${c.label}: "${c.text.replace(/"/g, "'")}"`
+        ).join('\n')
+      }\n`
+    : '';
+
+  return `You are generating response options for a real-life visual novel / galgame simulator.${contextBlock}
 Someone just said to you: "${said.replace(/"/g, "'")}"
 
-Generate exactly 4 short response options (1-2 sentences each).
+Generate exactly 4 short response options (1-2 sentences each).${context.length ? ' Let the past exchanges inform the tone and continuity of your responses.' : ''}
 CRITICAL RULES:
 - Do NOT use double-quote characters inside any response text. Use single quotes (') instead.
 - Do NOT use backslashes.

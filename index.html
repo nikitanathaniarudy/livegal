@@ -15,6 +15,7 @@
       <button class="nav-tab active" data-view="conversation">Conversation</button>
       <button class="nav-tab"        data-view="directory">Directory</button>
       <button class="nav-tab"        data-view="analytics">Analytics</button>
+      <button class="nav-tab"        data-view="network">Network</button>
     </nav>
     <div class="model-pill">
       <div class="status-dot" id="status-dot"></div>
@@ -142,6 +143,26 @@
     <!-- Person detail (conversations list) -->
     <div class="person-detail hidden" id="person-detail"></div>
 
+  </div>
+
+  <!-- ═══════════════ NETWORK VIEW ═══════════════ -->
+  <div id="view-network" class="view-hidden">
+    <div class="network-header">
+      <span class="network-title">— relationship network —</span>
+      <span class="network-legend">
+        <span class="legend-item" style="color:#6eb8c8">— friend</span>
+        <span class="legend-item" style="color:#9b7fd4">— family</span>
+        <span class="legend-item" style="color:#c87d6e">— romantic</span>
+        <span class="legend-item" style="color:#7ec89b">— work</span>
+      </span>
+    </div>
+    <div class="graph-wrap" id="graph-wrap">
+      <canvas id="graph-canvas"></canvas>
+      <div class="graph-empty hidden" id="graph-empty">
+        No relationships found yet.<br>
+        Conversations where someone names another person will appear here.
+      </div>
+    </div>
   </div>
 
   <!-- ═══════════════ ANALYTICS VIEW ═══════════════ -->
