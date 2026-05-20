@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-websockets
-faster-whisper
-pydub
-numpy
-python-multipart
