@@ -20,14 +20,51 @@
 
   <main class="scene">
 
-    <div class="scene-label">— they said —</div>
-    <div class="dialogue-box">
-      <div class="dialogue-speaker">Person</div>
-      <div class="dialogue-text empty" id="dialogue-display">
-        Type what they said below and press Generate ↓
+    <!-- Top row: camera panel + dialogue side by side -->
+    <div class="scene-top">
+
+      <!-- Left: camera feed + affection meter -->
+      <div class="camera-panel">
+        <div class="scene-label">— person —</div>
+
+        <div class="camera-preview" id="camera-preview">
+          <video id="camera-feed" autoplay playsinline muted></video>
+
+          <!-- Overlay shown before camera starts / while loading models -->
+          <div class="camera-overlay" id="camera-overlay">
+            <button class="camera-start-btn" id="camera-start-btn">Enable camera</button>
+            <div class="camera-overlay-hint" id="camera-overlay-hint"></div>
+          </div>
+
+          <!-- Score popup anchored to camera area -->
+          <div class="score-popup" id="score-popup"></div>
+        </div>
+
+        <!-- Affection meter -->
+        <div class="affection-meter">
+          <span class="affection-label">affection</span>
+          <div class="affection-bar-wrap">
+            <div class="affection-bar-fill" id="affection-bar-fill"></div>
+            <div class="affection-center-line"></div>
+          </div>
+          <span class="affection-total" id="affection-total">0</span>
+        </div>
       </div>
+
+      <!-- Right: dialogue box -->
+      <div class="dialogue-panel">
+        <div class="scene-label">— they said —</div>
+        <div class="dialogue-box">
+          <div class="dialogue-speaker">Person</div>
+          <div class="dialogue-text empty" id="dialogue-display">
+            Type what they said below and press Generate ↓
+          </div>
+        </div>
+      </div>
+
     </div>
 
+    <!-- Input row -->
     <div class="input-row">
       <button class="mic-btn" id="mic-btn" title="Click to speak">🎙</button>
       <input
@@ -58,6 +95,8 @@
     <div class="history-list" id="history-list"></div>
   </section>
 
+  <!-- face-api.js loaded as a global before ES modules -->
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>
