@@ -1,5 +1,7 @@
-// Ollama API endpoint
-export const OLLAMA_URL = 'http://localhost:11434/api/chat';
+// Ollama API endpoints
+export const OLLAMA_URL  = 'http://localhost:11434/api/chat';
+export const EMBED_URL   = 'http://localhost:11434/api/embeddings';
+export const EMBED_MODEL = 'nomic-embed-text';
 
 // Response type labels and their CSS classes (order matters — maps to choices)
 export const RESPONSE_TYPES = [

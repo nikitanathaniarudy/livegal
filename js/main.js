@@ -5,6 +5,7 @@ import { Camera }          from './camera.js';
 import { AffectionTracker, EXPRESSION_EMOJI } from './affection.js';
 import { GalGameDB }       from './db.js';
 import { computeAnalytics } from './analytics.js';
+import { ConversationRAG }  from './rag.js';
 import {
   setStatus, setDialogue, resetDialogue,
   showError, clearError, setHint,
@@ -20,6 +21,7 @@ import {
 const db        = new GalGameDB();
 const camera    = new Camera();
 const affection = new AffectionTracker();
+const rag       = new ConversationRAG();
 
 // ── Session state ─────────────────────────────────────────────────────
 
@@ -162,6 +164,7 @@ endSessionBtn.addEventListener('click', async () => {
   sessionStart    = null;
   history         = [];
   affection.total = 0;
+  rag.clear();
 
   renderHistory([]);
   updateAffectionMeter(0);
@@ -231,7 +234,8 @@ async function generate() {
   showShimmer();
 
   try {
-    const options = await fetchOptions(said, modelInput.value.trim() || 'llama3.2');
+    const context = await rag.retrieve(said);
+    const options = await fetchOptions(said, modelInput.value.trim() || 'llama3.2', context);
     renderChoices(options, handlePick);
     setStatus('');
   } catch (err) {
@@ -257,6 +261,8 @@ async function handlePick(index, label, text) {
   const entry = { said, label, text, cls };
   history.unshift(entry);
   renderHistory(history);
+
+  rag.add(entry); // fire-and-forget; fails silently if nomic-embed-text not pulled
 
   speechInput.value = '';
   resetDialogue();
@@ -291,5 +297,6 @@ generateBtn.addEventListener('click', generate);
 speechInput.addEventListener('keydown', e => { if (e.key === 'Enter') generate(); });
 document.getElementById('clear-btn').addEventListener('click', () => {
   history = [];
+  rag.clear();
   renderHistory([]);
 });
