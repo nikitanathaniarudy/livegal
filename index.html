@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Gal Game ✦</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;600&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <header>
+    <div class="logo">Live Gal Game <span>— prototype</span></div>
+    <div class="model-pill">
+      <div class="status-dot" id="status-dot"></div>
+      <span>model:</span>
+      <input type="text" id="model-input" value="llama3.2" spellcheck="false" title="Ollama model name"/>
+    </div>
+  </header>
+
+  <main class="scene">
+
+    <div class="scene-label">— they said —</div>
+    <div class="dialogue-box">
+      <div class="dialogue-speaker">Person</div>
+      <div class="dialogue-text empty" id="dialogue-display">
+        Type what they said below and press Generate ↓
+      </div>
+    </div>
+
+    <div class="input-row">
+      <button class="mic-btn" id="mic-btn" title="Click to speak">🎙</button>
+      <input
+        class="speech-input"
+        id="speech-input"
+        type="text"
+        placeholder="Type or press 🎙 to speak…"
+        autocomplete="off"
+      />
+      <button class="generate-btn" id="generate-btn">Generate →</button>
+    </div>
+    <div class="transcript-hint" id="transcript-hint"></div>
+
+    <div id="error-container"></div>
+
+    <div class="choices-label">— your response —</div>
+    <div class="choices-grid" id="choices-grid">
+      <div class="empty-choices">Options will appear here after you generate</div>
+    </div>
+
+  </main>
+
+  <section class="history-section">
+    <div class="history-label">
+      <span>— conversation history —</span>
+      <button class="clear-btn" id="clear-btn">clear</button>
+    </div>
+    <div class="history-list" id="history-list"></div>
+  </section>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
