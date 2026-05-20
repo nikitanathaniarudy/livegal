@@ -11,6 +11,11 @@
 
   <header>
     <div class="logo">Live Gal Game <span>— prototype</span></div>
+    <nav class="nav-tabs">
+      <button class="nav-tab active" data-view="conversation">Conversation</button>
+      <button class="nav-tab"        data-view="directory">Directory</button>
+      <button class="nav-tab"        data-view="analytics">Analytics</button>
+    </nav>
     <div class="model-pill">
       <div class="status-dot" id="status-dot"></div>
       <span>model:</span>
@@ -18,84 +23,137 @@
     </div>
   </header>
 
-  <main class="scene">
+  <!-- ═══════════════ CONVERSATION VIEW ═══════════════ -->
+  <div id="view-conversation">
 
-    <!-- Top row: camera panel + dialogue side by side -->
-    <div class="scene-top">
+    <!-- Person selector (shown when no active session) -->
+    <div class="person-selector" id="person-selector">
+      <div class="person-selector-inner">
+        <div class="person-selector-label">— who are you talking to? —</div>
 
-      <!-- Left: camera feed + affection meter -->
-      <div class="camera-panel">
-        <div class="scene-label">— person —</div>
+        <div class="person-selector-row">
+          <select class="person-select" id="person-select">
+            <option value="">Select person…</option>
+            <option value="__new__">+ New person</option>
+          </select>
+          <input
+            class="person-name-input"
+            id="person-name-input"
+            type="text"
+            placeholder="Enter their name"
+            autocomplete="off"
+            style="display:none"
+          />
+          <button class="start-session-btn" id="start-session-btn">Start session →</button>
+        </div>
+      </div>
+    </div>
 
-        <div class="camera-preview" id="camera-preview">
-          <video id="camera-feed" autoplay playsinline muted></video>
+    <!-- Active session bar (shown during a session) -->
+    <div class="session-bar hidden" id="session-bar">
+      <div class="session-person">
+        <span class="session-person-label">talking to</span>
+        <span class="session-person-name" id="session-person-name">—</span>
+      </div>
+      <button class="end-session-btn" id="end-session-btn">End session ✓</button>
+    </div>
 
-          <!-- Overlay shown before camera starts / while loading models -->
-          <div class="camera-overlay" id="camera-overlay">
-            <button class="camera-start-btn" id="camera-start-btn">Enable camera</button>
-            <div class="camera-overlay-hint" id="camera-overlay-hint"></div>
+    <main class="scene">
+
+      <div class="scene-top">
+        <!-- Left: camera + affection -->
+        <div class="camera-panel">
+          <div class="scene-label">— person —</div>
+          <div class="camera-preview" id="camera-preview">
+            <video id="camera-feed" autoplay playsinline muted></video>
+            <div class="camera-overlay" id="camera-overlay">
+              <button class="camera-start-btn" id="camera-start-btn">Enable camera</button>
+              <div class="camera-overlay-hint" id="camera-overlay-hint"></div>
+            </div>
+            <div class="score-popup" id="score-popup"></div>
           </div>
-
-          <!-- Score popup anchored to camera area -->
-          <div class="score-popup" id="score-popup"></div>
+          <div class="affection-meter">
+            <span class="affection-label">affection</span>
+            <div class="affection-bar-wrap">
+              <div class="affection-bar-fill" id="affection-bar-fill"></div>
+              <div class="affection-center-line"></div>
+            </div>
+            <span class="affection-total" id="affection-total">0</span>
+          </div>
         </div>
 
-        <!-- Affection meter -->
-        <div class="affection-meter">
-          <span class="affection-label">affection</span>
-          <div class="affection-bar-wrap">
-            <div class="affection-bar-fill" id="affection-bar-fill"></div>
-            <div class="affection-center-line"></div>
+        <!-- Right: dialogue -->
+        <div class="dialogue-panel">
+          <div class="scene-label">— they said —</div>
+          <div class="dialogue-box">
+            <div class="dialogue-speaker">Person</div>
+            <div class="dialogue-text empty" id="dialogue-display">
+              Type what they said below and press Generate ↓
+            </div>
           </div>
-          <span class="affection-total" id="affection-total">0</span>
         </div>
       </div>
 
-      <!-- Right: dialogue box -->
-      <div class="dialogue-panel">
-        <div class="scene-label">— they said —</div>
-        <div class="dialogue-box">
-          <div class="dialogue-speaker">Person</div>
-          <div class="dialogue-text empty" id="dialogue-display">
-            Type what they said below and press Generate ↓
-          </div>
-        </div>
+      <div class="input-row">
+        <button class="mic-btn" id="mic-btn" title="Click to speak">🎙</button>
+        <input
+          class="speech-input"
+          id="speech-input"
+          type="text"
+          placeholder="Type or press 🎙 to speak…"
+          autocomplete="off"
+        />
+        <button class="generate-btn" id="generate-btn">Generate →</button>
+      </div>
+      <div class="transcript-hint" id="transcript-hint"></div>
+
+      <div id="error-container"></div>
+
+      <div class="choices-label">— your response —</div>
+      <div class="choices-grid" id="choices-grid">
+        <div class="empty-choices">Options will appear here after you generate</div>
       </div>
 
+    </main>
+
+    <section class="history-section">
+      <div class="history-label">
+        <span>— this session —</span>
+        <button class="clear-btn" id="clear-btn">clear</button>
+      </div>
+      <div class="history-list" id="history-list"></div>
+    </section>
+
+  </div>
+
+  <!-- ═══════════════ DIRECTORY VIEW ═══════════════ -->
+  <div id="view-directory" class="view-hidden">
+
+    <div class="directory-header">
+      <div class="directory-title-row">
+        <span class="directory-title" id="directory-title">— people —</span>
+        <button class="dir-back-btn hidden" id="dir-back-btn">← back</button>
+      </div>
     </div>
 
-    <!-- Input row -->
-    <div class="input-row">
-      <button class="mic-btn" id="mic-btn" title="Click to speak">🎙</button>
-      <input
-        class="speech-input"
-        id="speech-input"
-        type="text"
-        placeholder="Type or press 🎙 to speak…"
-        autocomplete="off"
-      />
-      <button class="generate-btn" id="generate-btn">Generate →</button>
+    <!-- People grid -->
+    <div class="directory-grid" id="directory-grid"></div>
+
+    <!-- Person detail (conversations list) -->
+    <div class="person-detail hidden" id="person-detail"></div>
+
+  </div>
+
+  <!-- ═══════════════ ANALYTICS VIEW ═══════════════ -->
+  <div id="view-analytics" class="view-hidden">
+    <div class="analytics-wrap" id="analytics-wrap">
+      <!-- Populated by renderAnalytics() -->
+      <div class="analytics-empty">
+        No data yet. Complete a session to see your personality profile.
+      </div>
     </div>
-    <div class="transcript-hint" id="transcript-hint"></div>
+  </div>
 
-    <div id="error-container"></div>
-
-    <div class="choices-label">— your response —</div>
-    <div class="choices-grid" id="choices-grid">
-      <div class="empty-choices">Options will appear here after you generate</div>
-    </div>
-
-  </main>
-
-  <section class="history-section">
-    <div class="history-label">
-      <span>— conversation history —</span>
-      <button class="clear-btn" id="clear-btn">clear</button>
-    </div>
-    <div class="history-list" id="history-list"></div>
-  </section>
-
-  <!-- face-api.js loaded as a global before ES modules -->
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>
