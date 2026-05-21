@@ -39,17 +39,17 @@ function buildPrompt(said, context) {
   const labels = RESPONSE_TYPES.map(t => t.label).join(', ');
 
   const contextBlock = context.length
-    ? `\nRelevant past exchanges for context:\n${
+    ? `\nFrom earlier in this conversation you already know:\n${
         context.map(c =>
-          `- They said: "${c.said.replace(/"/g, "'")}" → You responded ${c.label}: "${c.text.replace(/"/g, "'")}"`
+          `- They said: "${c.said.replace(/"/g, "'")}" and you replied: "${c.text.replace(/"/g, "'")}"`
         ).join('\n')
-      }\n`
+      }\nUse this as memory — if the current message references something from above, acknowledge it naturally.\n`
     : '';
 
   return `You are generating response options for a real-life visual novel / galgame simulator.${contextBlock}
 Someone just said to you: "${said.replace(/"/g, "'")}"
 
-Generate exactly 4 short response options (1-2 sentences each).${context.length ? ' Let the past exchanges inform the tone and continuity of your responses.' : ''}
+Generate exactly 4 short response options (1-2 sentences each). If the current message references facts or names from the conversation memory above, use them in your responses.
 CRITICAL RULES:
 - Do NOT use double-quote characters inside any response text. Use single quotes (') instead.
 - Do NOT use backslashes.
