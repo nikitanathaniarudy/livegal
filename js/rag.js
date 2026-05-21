@@ -22,9 +22,8 @@ async function embed(text) {
 }
 
 /**
- * In-memory RAG store for one conversation session.
- * Each entry holds the raw exchange plus the embedding of what they said,
- * so retrieval finds past moments where the topic was similar.
+ * RAG memory store that works both in-session (fast) and across sessions (persistent).
+ * Entries are keyed to a person so memories accumulate over time with that specific person.
  */
 export class ConversationRAG {
   constructor() {
@@ -32,57 +31,47 @@ export class ConversationRAG {
   }
 
   /**
-   * Embed and store a completed exchange.
-   * Call this after the user picks a response.
-   * Fails silently — never blocks the main flow.
-   * @param {{ said: string, label: string, text: string, cls: string }} exchange
+   * Load all past memories for a person from IndexedDB into the in-memory store.
+   * Call this at session start after identifying the person.
+   * @param {GalGameDB} db
+   * @param {number} personId
    */
-  async add(exchange) {
+  async loadFromDB(db, personId) {
+    this._entries = [];
     try {
-      // Embed the full exchange so facts mentioned in either direction are retrievable
+      const rows = await db.getMemoriesForPerson(personId);
+      for (const row of rows) {
+        this._entries.push({
+          exchange: { said: row.said, text: row.text, label: row.label, cls: row.cls },
+          embedding: row.embedding,
+        });
+      }
+    } catch (_) {}
+  }
+
+  /**
+   * Embed a completed exchange, add it to the in-memory store, and persist it to IndexedDB.
+   * Call this after the user picks a response during an active session.
+   * Fails silently — never blocks the main flow.
+   * @param {{ said, text, label, cls }} exchange
+   * @param {GalGameDB} db
+   * @param {number} personId
+   */
+  async addAndPersist(exchange, db, personId) {
+    try {
       const fullText = `They said: ${exchange.said}. You responded: ${exchange.text}`;
       const embedding = await embed(fullText);
       this._entries.push({ exchange, embedding });
-    } catch (_) {
-      // Embedding unavailable — degrade gracefully
-    }
-  }
-
-  async addAndPersist(exchange, db, personId) {
-    try {
-      const embedding = await embed(exchange.said);
-      this._entries.push({ exchange, embedding });
       await db.saveMemory(personId, exchange, embedding);
-    } catch (_) {
-      // Embedding or IndexedDB unavailable — degrade gracefully
-    }
-  }
-
-  async loadFromDB(db, personId) {
-    try {
-      const memories = await db.getMemoriesForPerson(personId);
-      this._entries = memories
-        .filter(m => Array.isArray(m.embedding))
-        .map(m => ({
-          exchange: {
-            said:  m.said,
-            text:  m.text,
-            label: m.label,
-            cls:   m.cls,
-          },
-          embedding: m.embedding,
-        }));
-    } catch (_) {
-      this._entries = [];
-    }
+    } catch (_) {}
   }
 
   /**
    * Retrieve the top-K most relevant past exchanges for a given query.
+   * Searches across all sessions loaded for this person.
    * Returns [] if the store is empty or embedding fails.
-   * @param {string} query - current "said" text
+   * @param {string} query
    * @param {number} topK
-   * @returns {Promise<Array>}
    */
   async retrieve(query, topK = 3) {
     if (!this._entries.length) return [];
