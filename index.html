@@ -75,9 +75,12 @@
           </div>
           <div class="affection-meter">
             <span class="affection-label">affection</span>
-            <div class="affection-bar-wrap">
-              <div class="affection-bar-fill" id="affection-bar-fill"></div>
-              <div class="affection-center-line"></div>
+            <div class="affection-bar-col">
+              <div class="affection-bar-wrap">
+                <div class="affection-bar-fill" id="affection-bar-fill"></div>
+                <div class="affection-center-line"></div>
+              </div>
+              <svg id="affection-spark" class="affection-spark hidden" preserveAspectRatio="none"></svg>
             </div>
             <span class="affection-total" id="affection-total">0</span>
           </div>
@@ -172,6 +175,19 @@
       <div class="analytics-empty">
         No data yet. Complete a session to see your personality profile.
       </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ DEBRIEF MODAL ═══════════════ -->
+  <div id="debrief-modal" class="debrief-modal hidden">
+    <div class="debrief-backdrop" id="debrief-backdrop"></div>
+    <div class="debrief-panel">
+      <div class="debrief-header">
+        <span class="debrief-eyebrow">session review</span>
+        <div class="debrief-title" id="debrief-title"></div>
+        <button class="debrief-close" id="debrief-close">✕</button>
+      </div>
+      <div class="debrief-body" id="debrief-body"></div>
     </div>
   </div>
 

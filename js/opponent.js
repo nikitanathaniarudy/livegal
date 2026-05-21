@@ -9,6 +9,7 @@ import { OLLAMA_URL } from './config.js';
  */
 export async function extractOpponentCues(said, model) {
   if (!said?.trim()) return null;
+  if (said.trim().split(/\s+/).length < 5) return null; // skip one-liners
   try {
     const prompt =
       `Analyse this single statement made in a real conversation.\n` +
@@ -63,7 +64,7 @@ function parseCues(raw) {
  * for the other person. Returns null if not enough data.
  */
 export function computeOpponentProfile(observations) {
-  if (!observations?.length) return null;
+  if (!observations?.length || observations.length < 5) return null;
 
   const n   = observations.length;
   const avg = { warmth: 0, humor: 0, openness: 0, directness: 0 };
