@@ -39,7 +39,9 @@ export class ConversationRAG {
    */
   async add(exchange) {
     try {
-      const embedding = await embed(exchange.said);
+      // Embed the full exchange so facts mentioned in either direction are retrievable
+      const fullText = `They said: ${exchange.said}. You responded: ${exchange.text}`;
+      const embedding = await embed(fullText);
       this._entries.push({ exchange, embedding });
     } catch (_) {
       // Embedding unavailable — degrade gracefully
