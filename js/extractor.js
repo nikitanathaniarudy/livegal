@@ -18,73 +18,79 @@ function toTitleCase(str) {
   return str.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
 }
 
-function parse(raw) {
-  // 1. Remove markdown code blocks if present
+function parse(raw, said = '') {
   let text = raw.replace(/```json|```/gi, '').trim();
 
-  // 2. Try to find objects directly using regex as a first pass/fallback
-  // This is very robust against LLM chatter and bad array quoting
   const objectRegex = /\{[\s\S]*?\}/g;
   const matches = text.match(objectRegex);
-  
+
   if (matches) {
     const results = [];
     for (const m of matches) {
       try {
-        // Clean potential bad quotes inside the match if it's wrapped in quotes
-        let cleaned = m;
-        const result = validate(JSON.parse(cleaned));
+        const result = validate(JSON.parse(m), said);
         if (result) results.push(result);
-      } catch (_) {
-        // If JSON.parse fails, it might be the "unescaped quotes" issue
-        // Try a more aggressive cleanup or just skip
-      }
+      } catch (_) {}
     }
     if (results.length > 0) return results;
   }
 
-  // 3. Fallback to standard array parsing if regex didn't find anything valid
   const startArr = text.indexOf('[');
   const endArr   = text.lastIndexOf(']');
-  
+
   if (startArr !== -1 && endArr !== -1 && endArr > startArr) {
     const jsonPart = text.slice(startArr, endArr + 1);
     try {
       const parsed = JSON.parse(jsonPart);
       if (Array.isArray(parsed)) {
         if (parsed.length === 2 && typeof parsed[0] === 'string' && typeof parsed[1] === 'string') {
-           const result = validate({ name: parsed[0], relationship: parsed[1] });
-           return result ? [result] : [];
+          const result = validate({ name: parsed[0], relationship: parsed[1] }, said);
+          return result ? [result] : [];
         }
-        return parsed.map(validate).filter(Boolean);
+        return parsed.map(item => validate(item, said)).filter(Boolean);
       }
-      return [validate(parsed)].filter(Boolean);
-    } catch (err) { }
+      return [validate(parsed, said)].filter(Boolean);
+    } catch (_) {}
   }
 
   return [];
 }
 
-const BLACKLIST_NAMES = ['None', 'Unknown', 'N/A', 'Someone', 'Nobody', 'User', 'Speaker'];
+// Words that are never people's names — catches common LLM hallucinations
+const WORD_BLACKLIST = new Set([
+  'None', 'Unknown', 'N/A', 'Someone', 'Anyone', 'Everyone', 'Nobody',
+  'Everybody', 'Anybody', 'User', 'Speaker', 'Me', 'You', 'Him', 'Her',
+  'Them', 'Us', 'Myself', 'Yourself', 'Himself', 'Herself', 'Themselves',
+  'This', 'That', 'These', 'Those', 'Here', 'There', 'Now', 'Then', 'Soon',
+  'Later', 'Today', 'Tomorrow', 'Yesterday', 'Someday', 'Always', 'Never',
+  'Something', 'Nothing', 'Everything', 'Anything', 'Somewhere', 'Nowhere',
+  'Introducer', 'Presenter', 'Friend', 'Buddy', 'Boss', 'Manager', 'Colleague',
+]);
 
-function validate(item) {
+function validate(item, said = '') {
   let obj = item;
   if (typeof item === 'string' && item.includes('{')) {
     try { obj = JSON.parse(item); } catch (_) { return null; }
   }
-  
-  if (obj && typeof obj === 'object' && obj.name) {
-    const name = toTitleCase(String(obj.name).trim());
-    if (BLACKLIST_NAMES.includes(name)) return null;
 
-    return {
-      name,
-      relationship: obj.relationship ? String(obj.relationship).toLowerCase().trim() : null,
-      traits: Array.isArray(obj.traits) ? obj.traits.map(t => String(t).toLowerCase().trim()) : [],
-      category: obj.relationship ? categorize(String(obj.relationship)) : 'other'
-    };
-  }
-  return null;
+  if (!obj || typeof obj !== 'object' || !obj.name) return null;
+
+  const name = toTitleCase(String(obj.name).trim());
+
+  if (name.length < 2)                 return null; // too short
+  if (WORD_BLACKLIST.has(name))        return null; // common word
+  if (/^\d/.test(name))               return null; // starts with digit
+  if (name.split(/\s+/).length > 3)   return null; // too many words for a name
+
+  // The name must actually appear in what was said — kills LLM hallucinations
+  if (said && !said.toLowerCase().includes(name.toLowerCase())) return null;
+
+  return {
+    name,
+    relationship: obj.relationship ? String(obj.relationship).toLowerCase().trim() : null,
+    traits:       Array.isArray(obj.traits) ? obj.traits.map(t => String(t).toLowerCase().trim()) : [],
+    category:     obj.relationship ? categorize(String(obj.relationship)) : 'other',
+  };
 }
 
 /**
@@ -98,22 +104,29 @@ function validate(item) {
  */
 export async function extractRelationships(said, model, speakerName) {
   const prompt =
-`Analyze the text and extract any people mentioned (other than ${speakerName}).
-Distinguish between their permanent RELATIONSHIP to ${speakerName} and their current TRAITS/ADJECTIVES.
+`Extract ONLY real named people from this text (excluding ${speakerName}).
 
 Text: "${said.replace(/"/g, "'")}"
 
-Instructions:
-- Return ONLY a raw JSON array of objects.
-- "name": person's name (Title Case).
-- "relationship": their role (e.g. "child", "friend", "boss"). Use null if not mentioned.
-- "traits": array of adjectives describing them (e.g. ["naughty", "kind"]). Empty array if none.
+STRICT RULES:
+- A person MUST have an actual first name or full name used in the text.
+- Do NOT extract: pronouns (her, him, they), adverbs (someday, later), common words, or anything that is not a person's real name.
+- If no named person is mentioned, return exactly: []
+- Return ONLY raw JSON array, no explanation.
 
-Example:
-"Raynard is my child and has been so naughty" -> [{"name":"Raynard","relationship":"child","traits":["naughty"]}]
-"Alice is a kind friend" -> [{"name":"Alice","relationship":"friend","traits":["kind"]}]
+Fields per person:
+- "name": their proper name (Title Case, must appear verbatim in the text)
+- "relationship": their connection to ${speakerName} (e.g. "friend", "sister"). null if unclear.
+- "traits": adjectives describing them. [] if none.
 
-JSON ONLY.`;
+Examples:
+"I'm gonna catch up with my friend Sandra" → [{"name":"Sandra","relationship":"friend","traits":[]}]
+"I will introduce you to her someday" → []
+"My boss Tom is really strict" → [{"name":"Tom","relationship":"boss","traits":["strict"]}]
+"Let's go see Alice" → [{"name":"Alice","relationship":null,"traits":[]}]
+"I might see someone later" → []
+
+JSON ONLY:`;
 
   try {
     const res = await fetch(OLLAMA_URL, {
@@ -131,9 +144,7 @@ JSON ONLY.`;
     }
     const data = await res.json();
     const content = data.message?.content || '';
-    console.log('LLM Relationship Raw Output:', content);
-    const parsed = parse(content);
-    console.log('Parsed Relationships:', parsed);
+    const parsed = parse(content, said);
     return parsed;
   } catch (err) {
     console.error('Relationship extraction error:', err);
