@@ -51,9 +51,20 @@ Then open http://localhost:8080 in Chrome or Edge.
 
 - [x] Milestone 1 — Text input → 4 AI options → history log
 - [x] Milestone 2 — Microphone / speech-to-text input
-- [ ] Milestone 3 — Camera + facial expression → affection scoring
-- [ ] Milestone 4 — Database + people directory
-- [ ] Milestone 5 — Personality analytics dashboard
+- [x] Milestone 3 — Camera + facial expression → affection scoring
+- [x] Milestone 4 — Database + people directory
+- [x] Milestone 5 — Personality analytics dashboard
 
 ## Changing the model
 Edit the model name in the top-right pill, or change the default in `js/config.js`.
+
+## Goals
+### Priority
+- [ ] Fine tune the model
+- [ ] Smarter network -> extrapolation of relationships
+- [ ] Migration to phone
+- [ ] UI Revamp
+- [ ] Deployment
+
+### Less Priority
+- [ ] Code cleaning
