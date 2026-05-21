@@ -39,8 +39,9 @@ export class RelationshipGraph {
   /**
    * @param {Array} dbPeople      - rows from people store
    * @param {Array} relationships - rows from relationships store
+   * @param {string} activeName   - name of the currently active person
    */
-  setData(dbPeople, relationships) {
+  setData(dbPeople, relationships, activeName = null) {
     cancelAnimationFrame(this._raf);
     this._nodes.clear();
     this._edges = [];
@@ -56,18 +57,24 @@ export class RelationshipGraph {
     relationships.forEach(r => { keys.add(r.fromName); keys.add(r.toName); });
 
     const keyArr = [...keys];
-    const dbNames = new Set(dbPeople.map(p => p.name));
+    const peopleMap = new Map(dbPeople.map(p => [p.name, p]));
 
     keyArr.forEach((name, i) => {
       const angle = (i / keyArr.length) * Math.PI * 2;
       const rad   = Math.min(W, H) * 0.28;
+      const person = peopleMap.get(name);
+      
+      // A node is "talked to" if it has history OR it is the person we are currently talking to
+      const isTalked = (person && person.conversationCount > 0) || (activeName && name === activeName);
+
       this._nodes.set(name, {
         x: cx + rad * Math.cos(angle) + (Math.random() - 0.5) * 20,
         y: cy + rad * Math.sin(angle) + (Math.random() - 0.5) * 20,
         vx: 0, vy: 0,
-        r:    dbNames.has(name) ? R_DB : R_MENTION,
-        type: dbNames.has(name) ? 'db' : 'mention',
+        r:    isTalked ? R_DB : R_MENTION,
+        type: isTalked ? 'talked' : 'mention',
         label: name,
+        isActive: activeName && name === activeName,
       });
     });
 
@@ -212,36 +219,50 @@ export class RelationshipGraph {
 
     // Nodes
     for (const [, n] of this._nodes) {
-      const isDB      = n.type === 'db';
+      const isTalked  = n.type === 'talked';
       const isHovered = n === this._hovered;
+      const isActive  = n.isActive;
+
+      ctx.save();
+      if (!isTalked) ctx.globalAlpha = 0.5;
+
+      // Pulse/Glow for the person we are currently talking to
+      if (isActive) {
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.r + 8, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(110, 184, 200, 0.2)'; // Cyan-ish glow
+        ctx.fill();
+      }
 
       // Glow ring on hover
       if (isHovered) {
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r + 6, 0, Math.PI * 2);
-        ctx.fillStyle = isDB ? 'rgba(200,169,110,0.15)' : 'rgba(155,127,212,0.12)';
+        ctx.fillStyle = isTalked ? 'rgba(200,169,110,0.15)' : 'rgba(155,127,212,0.12)';
         ctx.fill();
       }
 
       // Circle fill
       ctx.beginPath();
       ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-      ctx.fillStyle = isDB ? '#1a1628' : '#13101e';
+      ctx.fillStyle = isTalked ? '#1a1628' : '#13101e';
       ctx.fill();
 
       // Circle border
-      ctx.strokeStyle = isDB ? '#c8a96e' : '#4a4560';
-      ctx.lineWidth   = isDB ? 1.5 : 1;
+      ctx.strokeStyle = isTalked ? '#c8a96e' : '#4a4560';
+      ctx.lineWidth   = isTalked ? 1.5 : 1;
       ctx.stroke();
 
       // Name label
-      const maxChars = isDB ? 10 : 8;
+      const maxChars = isTalked ? 10 : 8;
       const display  = n.label.length > maxChars ? n.label.slice(0, maxChars - 1) + '…' : n.label;
-      ctx.font        = `${isDB ? 11 : 9}px DM Mono, monospace`;
+      ctx.font        = `${isTalked ? 11 : 9}px DM Mono, monospace`;
       ctx.textAlign   = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle   = isDB ? '#e8e0d4' : '#9a9080';
+      ctx.fillStyle   = isTalked ? '#e8e0d4' : '#9a9080';
       ctx.fillText(display, n.x, n.y);
+
+      ctx.restore();
     }
 
     ctx.restore();

@@ -14,20 +14,70 @@ function categorize(relationship) {
   return 'other';
 }
 
+function toTitleCase(str) {
+  return str.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+}
+
 function parse(raw) {
-  const text = raw.replace(/```json|```/gi, '').trim();
-  const match = text.match(/\[[\s\S]*?\]/);
-  if (!match) return [];
-  try {
-    const arr = JSON.parse(match[0]);
-    return Array.isArray(arr)
-      ? arr
-          .filter(r => r.name && r.relationship && typeof r.name === 'string')
-          .map(r => ({ ...r, category: categorize(r.relationship) }))
-      : [];
-  } catch (_) {
-    return [];
+  // 1. Remove markdown code blocks if present
+  let text = raw.replace(/```json|```/gi, '').trim();
+
+  // 2. Try to find an array first [...]
+  const startArr = text.indexOf('[');
+  const endArr   = text.lastIndexOf(']');
+  
+  if (startArr !== -1 && endArr !== -1 && endArr > startArr) {
+    const jsonPart = text.slice(startArr, endArr + 1);
+    try {
+      const parsed = JSON.parse(jsonPart);
+      
+      // Case A: Array of objects or strings
+      if (Array.isArray(parsed)) {
+        // Special Case: Simple pair ["Nikita", "spouse"]
+        if (parsed.length === 2 && typeof parsed[0] === 'string' && typeof parsed[1] === 'string' && !parsed[0].includes('{')) {
+           const result = validate({ name: parsed[0], relationship: parsed[1] });
+           return result ? [result] : [];
+        }
+        
+        return parsed.map(validate).filter(Boolean);
+      }
+      
+      // Case B: Single object {...}
+      return [validate(parsed)].filter(Boolean);
+    } catch (err) {
+      console.warn('Relationship parse failed on slice:', jsonPart, err);
+    }
   }
+
+  // 3. Fallback: Try to find a single object if no array was found
+  const startObj = text.indexOf('{');
+  const endObj   = text.lastIndexOf('}');
+  if (startObj !== -1 && endObj !== -1 && endObj > startObj) {
+    const jsonPart = text.slice(startObj, endObj + 1);
+    try {
+      const obj = JSON.parse(jsonPart);
+      return [validate(obj)].filter(Boolean);
+    } catch (_) { return []; }
+  }
+
+  return [];
+}
+
+function validate(item) {
+  // If LLM returned a stringified object inside an array, try to parse it
+  let obj = item;
+  if (typeof item === 'string' && item.includes('{')) {
+    try { obj = JSON.parse(item); } catch (_) { return null; }
+  }
+  
+  if (obj && typeof obj === 'object' && obj.name && obj.relationship) {
+    return {
+      name: toTitleCase(String(obj.name).trim()),
+      relationship: String(obj.relationship).toLowerCase().trim(),
+      category: categorize(String(obj.relationship))
+    };
+  }
+  return null;
 }
 
 /**
@@ -41,13 +91,22 @@ function parse(raw) {
  */
 export async function extractRelationships(said, model, speakerName) {
   const prompt =
-`List any people that ${speakerName} explicitly names and their relationship to ${speakerName} in the sentence below.
+`Analyze the text and extract any people mentioned (other than ${speakerName}) and their relationship to ${speakerName}.
 
-"${said.replace(/"/g, "'")}"
+Text: "${said.replace(/"/g, "'")}"
 
-Return ONLY a JSON array. If no person is named, return [].
-Format: [{"name":"Alice","relationship":"close friend"}]
-Names must be proper nouns. Do not invent names not in the sentence.`;
+Instructions:
+- Return ONLY a raw JSON array of objects.
+- Each object MUST have "name" (the person's name) and "relationship" (their role).
+- Relationships can be roles (friend, dad), statuses (spouse, ex), or labels (stranger, enemy).
+- Be careful to find single names like "Don" or "Nikita".
+
+Examples:
+"I'm going to see my therapist Don" -> [{"name":"Don","relationship":"therapist"}]
+"Terry disowned me, I am a stranger" -> [{"name":"Terry","relationship":"stranger"}]
+"Nikita and me got married" -> [{"name":"Nikita","relationship":"spouse"}]
+
+Return [] if no other people are named. JSON ONLY.`;
 
   try {
     const res = await fetch(OLLAMA_URL, {
@@ -59,10 +118,18 @@ Names must be proper nouns. Do not invent names not in the sentence.`;
         stream: false,
       }),
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.error('Relationship extraction failed: HTTP', res.status);
+      return [];
+    }
     const data = await res.json();
-    return parse(data.message?.content || '');
-  } catch (_) {
+    const content = data.message?.content || '';
+    console.log('LLM Relationship Raw Output:', content);
+    const parsed = parse(content);
+    console.log('Parsed Relationships:', parsed);
+    return parsed;
+  } catch (err) {
+    console.error('Relationship extraction error:', err);
     return [];
   }
 }
