@@ -49,7 +49,7 @@ export class RecognitionTracker {
       const labeledDescriptors = this.knownPeople.map(p => 
         new faceapi.LabeledFaceDescriptors(String(p.id), [p.descriptor])
       );
-      this.matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6); // 0.6 distance threshold
+      this.matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.45); // 0.45 distance threshold (stricter)
     } else {
       this.matcher = null;
     }
@@ -82,6 +82,11 @@ export class RecognitionTracker {
     if (match.label === 'unknown') return null;
     
     const personId = Number(match.label);
-    return this.knownPeople.find(p => p.id === personId) || null;
+    const person = this.knownPeople.find(p => p.id === personId);
+    
+    if (person) {
+      return { ...person, distance: match.distance };
+    }
+    return null;
   }
 }

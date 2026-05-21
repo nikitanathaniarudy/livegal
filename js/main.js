@@ -80,7 +80,12 @@ async function recognitionLoop() {
       const match = recognition.recognize(descriptor);
       if (match) {
         const person = await db.getPerson(match.id);
-        if (person) await startSession(person);
+        if (person) {
+          // If the distance is very low (very confident), just start
+          // If it's a bit higher, maybe we should double check?
+          // For now, let's just start but add a "Not you?" button or logic
+          await startSession(person, true);
+        }
       } else {
         const name = prompt("I don't recognize you. What is your name?");
         if (name) {
@@ -97,7 +102,7 @@ async function recognitionLoop() {
           const people = await db.getAllPeople();
           populatePersonSelect(people);
           recognition.updateKnownPeople(people);
-          await startSession(person);
+          await startSession(person, false);
         } else {
           await new Promise(r => setTimeout(r, 5000));
         }
@@ -110,7 +115,7 @@ async function recognitionLoop() {
   isRecognizing = false;
 }
 
-async function startSession(person) {
+async function startSession(person, autoRecognized = false) {
   currentPerson   = person;
   sessionStart    = new Date().toISOString();
   history         = [];
@@ -122,7 +127,13 @@ async function startSession(person) {
   renderHistory(history);
   updateAffectionMeter(0);
   showSessionBar(person.name);
-  setHint(`Hello, ${person.name}!`);
+  
+  if (autoRecognized) {
+    setHint(`Hello, ${person.name}! (Not you? End session to switch)`);
+  } else {
+    setHint(`Hello, ${person.name}!`);
+  }
+  
   speechInput.focus();
 }
 
@@ -263,7 +274,7 @@ startSessionBtn.addEventListener('click', async () => {
     person = await db.getPerson(id);
   }
 
-  await startSession(person);
+  await startSession(person, false);
 });
 
 // ── End session ───────────────────────────────────────────────────────
