@@ -1,13 +1,13 @@
-const REPULSION  = 7000;
-const ATTRACTION = 0.045;
-const DAMPING    = 0.80;
-const GRAVITY    = 0.035;
-const REST_LEN   = 170;
-const KE_THRESH  = 0.08;
-const MAX_TICKS  = 500;
+const REPULSION  = 12000; // Increased significantly to push nodes apart
+const ATTRACTION = 0.03;   // Slightly weaker to allow expansion
+const DAMPING    = 0.92;   // More fluid motion (was 0.80)
+const GRAVITY    = 0.015;  // Much weaker center pull (was 0.035)
+const REST_LEN   = 220;    // More space between connected nodes (was 170)
+const KE_THRESH  = 0.01;   // Settle more precisely
+const MAX_TICKS  = 1500;   // Allow longer for complex graphs to settle
 
-const R_DB       = 30;   // radius: person in DB
-const R_MENTION  = 20;   // radius: mentioned only
+const R_DB       = 28;
+const R_MENTION  = 18;
 
 const CAT_COLOR = {
   friend:   '#6eb8c8',
@@ -27,6 +27,8 @@ export class RelationshipGraph {
     this._ticks   = 0;
     this._drag    = null;        // node being dragged
     this._hovered = null;        // node under cursor
+    this._selected = null;       // node clicked for details
+    this.onNodeClick = null;     // callback: (node) => void
 
     canvas.addEventListener('mousedown',  this._onDown.bind(this));
     canvas.addEventListener('mousemove',  this._onMove.bind(this));
@@ -75,6 +77,7 @@ export class RelationshipGraph {
         type: isTalked ? 'talked' : 'mention',
         label: name,
         isActive: activeName && name === activeName,
+        traits: person ? (person.traits || []) : [],
       });
     });
 
@@ -123,16 +126,27 @@ export class RelationshipGraph {
     // Reset forces
     for (const n of nodes) { n.fx = 0; n.fy = 0; }
 
-    // Repulsion between every pair
+    // Repulsion between every pair + Collision avoidance
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         const a = nodes[i], b = nodes[j];
         const dx = b.x - a.x, dy = b.y - a.y;
-        const dist = Math.max(1, Math.hypot(dx, dy));
+        const dist = Math.max(0.1, Math.hypot(dx, dy));
+        
+        // Repulsion
         const f  = REPULSION / (dist * dist);
         const fx = f * dx / dist, fy = f * dy / dist;
         a.fx -= fx; a.fy -= fy;
         b.fx += fx; b.fy += fy;
+
+        // Hard collision avoidance
+        const minHighlight = a.r + b.r + 20;
+        if (dist < minHighlight) {
+          const push = (minHighlight - dist) * 0.5;
+          const px = push * dx / dist, py = push * dy / dist;
+          a.fx -= px; a.fy -= py;
+          b.fx += px; b.fy += py;
+        }
       }
     }
 
@@ -195,26 +209,28 @@ export class RelationshipGraph {
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.strokeStyle = color;
-      ctx.lineWidth   = 1.5;
-      ctx.globalAlpha = 0.45;
+      ctx.lineWidth   = 0.8; // Thinner lines
+      ctx.globalAlpha = 0.25; // More subtle edges
       ctx.stroke();
       ctx.globalAlpha = 1;
 
-      // Label at midpoint
+      // Label at midpoint (only if not too crowded or on hover? let's keep it subtle)
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       const labelText = e.labels.join(', ');
-      ctx.font = '9px DM Mono, monospace';
+      ctx.font = '8px DM Mono, monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const tw = ctx.measureText(labelText).width;
 
       ctx.fillStyle = '#0d0b14';
-      ctx.globalAlpha = 0.75;
-      ctx.fillRect(mx - tw / 2 - 4, my - 7, tw + 8, 14);
+      ctx.globalAlpha = 0.4; // More transparent label background
+      ctx.fillRect(mx - tw / 2 - 2, my - 6, tw + 4, 12);
       ctx.globalAlpha = 1;
 
       ctx.fillStyle = color;
+      ctx.globalAlpha = 0.6;
       ctx.fillText(labelText, mx, my);
+      ctx.globalAlpha = 1;
     }
 
     // Nodes
@@ -224,21 +240,26 @@ export class RelationshipGraph {
       const isActive  = n.isActive;
 
       ctx.save();
-      if (!isTalked) ctx.globalAlpha = 0.5;
+      if (!isTalked) ctx.globalAlpha = 0.4;
 
       // Pulse/Glow for the person we are currently talking to
       if (isActive) {
         ctx.beginPath();
-        ctx.arc(n.x, n.y, n.r + 8, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(110, 184, 200, 0.2)'; // Cyan-ish glow
+        ctx.arc(n.x, n.y, n.r + 12, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(110, 184, 200, 0.15)';
+        ctx.fill();
+        
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.r + 6, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(110, 184, 200, 0.1)';
         ctx.fill();
       }
 
       // Glow ring on hover
       if (isHovered) {
         ctx.beginPath();
-        ctx.arc(n.x, n.y, n.r + 6, 0, Math.PI * 2);
-        ctx.fillStyle = isTalked ? 'rgba(200,169,110,0.15)' : 'rgba(155,127,212,0.12)';
+        ctx.arc(n.x, n.y, n.r + 8, 0, Math.PI * 2);
+        ctx.fillStyle = isTalked ? 'rgba(200,169,110,0.1)' : 'rgba(155,127,212,0.08)';
         ctx.fill();
       }
 
@@ -249,20 +270,74 @@ export class RelationshipGraph {
       ctx.fill();
 
       // Circle border
-      ctx.strokeStyle = isTalked ? '#c8a96e' : '#4a4560';
+      ctx.strokeStyle = isTalked ? (isActive ? '#6eb8c8' : '#c8a96e') : '#3a3550';
       ctx.lineWidth   = isTalked ? 1.5 : 1;
       ctx.stroke();
 
       // Name label
-      const maxChars = isTalked ? 10 : 8;
+      const maxChars = isTalked ? 12 : 10;
       const display  = n.label.length > maxChars ? n.label.slice(0, maxChars - 1) + '…' : n.label;
-      ctx.font        = `${isTalked ? 11 : 9}px DM Mono, monospace`;
+      ctx.font        = `${isTalked ? 10 : 8}px DM Mono, monospace`;
       ctx.textAlign   = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle   = isTalked ? '#e8e0d4' : '#9a9080';
+      ctx.fillStyle   = isTalked ? '#e8e0d4' : '#8a8070';
       ctx.fillText(display, n.x, n.y);
 
       ctx.restore();
+    }
+
+    // Details Panel (Top Right)
+    if (this._selected) {
+      const p = this._selected;
+      const traits = p.traits || [];
+      const roles = this._edges
+        .filter(e => e.from === p.label || e.to === p.label)
+        .map(e => e.labels.join(', '))
+        .join(', ');
+
+      const panelW = 160;
+      const panelH = 60 + (traits.length * 12);
+      const px = W - panelW - 20;
+      const py = 20;
+
+      // Background
+      ctx.fillStyle = 'rgba(13, 11, 20, 0.85)';
+      ctx.strokeStyle = '#c8a96e';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(px, py, panelW, panelH, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      // Title
+      ctx.font = 'bold 12px DM Mono, monospace';
+      ctx.fillStyle = '#e8e0d4';
+      ctx.textAlign = 'left';
+      ctx.fillText(p.label, px + 12, py + 22);
+
+      // Roles
+      ctx.font = '9px DM Mono, monospace';
+      ctx.fillStyle = '#8a8070';
+      ctx.fillText(roles || 'no roles', px + 12, py + 36);
+
+      // Divider
+      ctx.strokeStyle = 'rgba(232, 224, 212, 0.1)';
+      ctx.beginPath();
+      ctx.moveTo(px + 10, py + 42);
+      ctx.lineTo(px + panelW - 10, py + 42);
+      ctx.stroke();
+
+      // Traits
+      ctx.font = '9px DM Mono, monospace';
+      ctx.fillStyle = '#6eb8c8';
+      if (traits.length > 0) {
+        traits.forEach((t, i) => {
+          ctx.fillText(`• ${t}`, px + 12, py + 56 + (i * 12));
+        });
+      } else {
+        ctx.fillStyle = '#4a4560';
+        ctx.fillText('no traits recorded', px + 12, py + 56);
+      }
     }
 
     ctx.restore();
@@ -272,7 +347,7 @@ export class RelationshipGraph {
 
   _nodeAt(mx, my) {
     for (const [, n] of this._nodes) {
-      if (Math.hypot(mx - n.x, my - n.y) <= n.r + 4) return n;
+      if (Math.hypot(mx - n.x, my - n.y) <= n.r + 15) return n; // Increased tolerance from 4 to 15
     }
     return null;
   }
@@ -284,8 +359,20 @@ export class RelationshipGraph {
 
   _onDown(e) {
     const { x, y } = this._canvasXY(e);
+    console.log(`Canvas down at ${x}, ${y}`);
     const node = this._nodeAt(x, y);
-    if (!node) return;
+    
+    this._selected = node; // Set selected node (could be null to deselect)
+    
+    if (!node) {
+      console.log('No node found at click location');
+      this._draw();
+      return;
+    }
+    
+    console.log(`Node found: ${node.label}`);
+    if (this.onNodeClick) this.onNodeClick(node);
+    
     this._drag = node;
     // Resume animation while dragging
     cancelAnimationFrame(this._raf);

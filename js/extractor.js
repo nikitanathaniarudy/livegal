@@ -22,7 +22,28 @@ function parse(raw) {
   // 1. Remove markdown code blocks if present
   let text = raw.replace(/```json|```/gi, '').trim();
 
-  // 2. Try to find an array first [...]
+  // 2. Try to find objects directly using regex as a first pass/fallback
+  // This is very robust against LLM chatter and bad array quoting
+  const objectRegex = /\{[\s\S]*?\}/g;
+  const matches = text.match(objectRegex);
+  
+  if (matches) {
+    const results = [];
+    for (const m of matches) {
+      try {
+        // Clean potential bad quotes inside the match if it's wrapped in quotes
+        let cleaned = m;
+        const result = validate(JSON.parse(cleaned));
+        if (result) results.push(result);
+      } catch (_) {
+        // If JSON.parse fails, it might be the "unescaped quotes" issue
+        // Try a more aggressive cleanup or just skip
+      }
+    }
+    if (results.length > 0) return results;
+  }
+
+  // 3. Fallback to standard array parsing if regex didn't find anything valid
   const startArr = text.indexOf('[');
   const endArr   = text.lastIndexOf(']');
   
@@ -30,83 +51,69 @@ function parse(raw) {
     const jsonPart = text.slice(startArr, endArr + 1);
     try {
       const parsed = JSON.parse(jsonPart);
-      
-      // Case A: Array of objects or strings
       if (Array.isArray(parsed)) {
-        // Special Case: Simple pair ["Nikita", "spouse"]
-        if (parsed.length === 2 && typeof parsed[0] === 'string' && typeof parsed[1] === 'string' && !parsed[0].includes('{')) {
+        if (parsed.length === 2 && typeof parsed[0] === 'string' && typeof parsed[1] === 'string') {
            const result = validate({ name: parsed[0], relationship: parsed[1] });
            return result ? [result] : [];
         }
-        
         return parsed.map(validate).filter(Boolean);
       }
-      
-      // Case B: Single object {...}
       return [validate(parsed)].filter(Boolean);
-    } catch (err) {
-      console.warn('Relationship parse failed on slice:', jsonPart, err);
-    }
-  }
-
-  // 3. Fallback: Try to find a single object if no array was found
-  const startObj = text.indexOf('{');
-  const endObj   = text.lastIndexOf('}');
-  if (startObj !== -1 && endObj !== -1 && endObj > startObj) {
-    const jsonPart = text.slice(startObj, endObj + 1);
-    try {
-      const obj = JSON.parse(jsonPart);
-      return [validate(obj)].filter(Boolean);
-    } catch (_) { return []; }
+    } catch (err) { }
   }
 
   return [];
 }
 
+const BLACKLIST_NAMES = ['None', 'Unknown', 'N/A', 'Someone', 'Nobody', 'User', 'Speaker'];
+
 function validate(item) {
-  // If LLM returned a stringified object inside an array, try to parse it
   let obj = item;
   if (typeof item === 'string' && item.includes('{')) {
     try { obj = JSON.parse(item); } catch (_) { return null; }
   }
   
-  if (obj && typeof obj === 'object' && obj.name && obj.relationship) {
+  if (obj && typeof obj === 'object' && obj.name) {
+    const name = toTitleCase(String(obj.name).trim());
+    if (BLACKLIST_NAMES.includes(name)) return null;
+
     return {
-      name: toTitleCase(String(obj.name).trim()),
-      relationship: String(obj.relationship).toLowerCase().trim(),
-      category: categorize(String(obj.relationship))
+      name,
+      relationship: obj.relationship ? String(obj.relationship).toLowerCase().trim() : null,
+      traits: Array.isArray(obj.traits) ? obj.traits.map(t => String(t).toLowerCase().trim()) : [],
+      category: obj.relationship ? categorize(String(obj.relationship)) : 'other'
     };
   }
   return null;
 }
 
 /**
- * Calls the LLM to extract named people and relationships from what someone said.
+ * Calls the LLM to extract named people, relationships, and traits from what someone said.
  * Fire-and-forget safe — always resolves (never throws).
  *
  * @param {string} said        - what the person said
  * @param {string} model       - Ollama model name
  * @param {string} speakerName - name of the person who said it
- * @returns {Promise<Array<{name, relationship, category}>>}
+ * @returns {Promise<Array<{name, relationship, traits, category}>>}
  */
 export async function extractRelationships(said, model, speakerName) {
   const prompt =
-`Analyze the text and extract any people mentioned (other than ${speakerName}) and their relationship to ${speakerName}.
+`Analyze the text and extract any people mentioned (other than ${speakerName}).
+Distinguish between their permanent RELATIONSHIP to ${speakerName} and their current TRAITS/ADJECTIVES.
 
 Text: "${said.replace(/"/g, "'")}"
 
 Instructions:
 - Return ONLY a raw JSON array of objects.
-- Each object MUST have "name" (the person's name) and "relationship" (their role).
-- Relationships can be roles (friend, dad), statuses (spouse, ex), or labels (stranger, enemy).
-- Be careful to find single names like "Don" or "Nikita".
+- "name": person's name (Title Case).
+- "relationship": their role (e.g. "child", "friend", "boss"). Use null if not mentioned.
+- "traits": array of adjectives describing them (e.g. ["naughty", "kind"]). Empty array if none.
 
-Examples:
-"I'm going to see my therapist Don" -> [{"name":"Don","relationship":"therapist"}]
-"Terry disowned me, I am a stranger" -> [{"name":"Terry","relationship":"stranger"}]
-"Nikita and me got married" -> [{"name":"Nikita","relationship":"spouse"}]
+Example:
+"Raynard is my child and has been so naughty" -> [{"name":"Raynard","relationship":"child","traits":["naughty"]}]
+"Alice is a kind friend" -> [{"name":"Alice","relationship":"friend","traits":["kind"]}]
 
-Return [] if no other people are named. JSON ONLY.`;
+JSON ONLY.`;
 
   try {
     const res = await fetch(OLLAMA_URL, {

@@ -81,6 +81,7 @@ export class GalGameDB {
     return this._add('people', {
       name,
       faceDescriptor,
+      traits:            [],
       createdAt:         now,
       lastSeen:          now,
       totalAffection:    0,

@@ -188,6 +188,17 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
       ]);
 
       if (!graph) graph = new RelationshipGraph(canvas);
+      
+      // Ensure click handler is ALWAYS set, even if graph was already initialized
+      graph.onNodeClick = (node) => {
+        console.log(`Graph node clicked: ${node.label}`, node.traits);
+        const traits = node.traits || [];
+        if (traits.length > 0) {
+          setHint(`[${node.label}] traits: ${traits.join(', ')}`, true);
+        } else {
+          setHint(`[${node.label}] No specific traits recorded.`, true);
+        }
+      };
 
       const hasData = people.length > 0 || relationships.length > 0;
       emptyEl.classList.toggle('hidden', hasData);
@@ -389,16 +400,38 @@ async function generate() {
     console.log(`Extracting relationships from: "${said}" (Speaker: ${currentPerson.name})`);
     extractRelationships(said, model, currentPerson.name).then(async found => {
       let anyNew = false;
-      for (const { name, relationship, category } of found) {
+      for (const { name, relationship, traits, category } of found) {
+        // Filter out the current speaker to avoid "Raynard is stubborn" being added as a link to himself
+        if (name === currentPerson.name) {
+          // But still update traits for the current person!
+          if (traits && traits.length > 0) {
+            const newTraits = [...new Set([...(currentPerson.traits || []), ...traits])];
+            await db.updatePerson(currentPerson.id, { traits: newTraits });
+            anyNew = true;
+          }
+          continue;
+        }
+
         let mentionedPerson = await db.getPersonByName(name);
         if (!mentionedPerson) {
           console.log(`Discovered NEW person via mention: ${name}`);
           mentionedPerson = await db.createPerson(name);
           anyNew = true;
         }
-        console.log(`Saving relationship: ${currentPerson.name} -> ${name} (${relationship})`);
-        await db.saveRelationship(currentPerson.id, currentPerson.name, name, relationship, category, said);
-        anyNew = true;
+
+        // 1. Update traits (adjectives)
+        if (traits && traits.length > 0) {
+          const newTraits = [...new Set([...(mentionedPerson.traits || []), ...traits])];
+          await db.updatePerson(mentionedPerson.id, { traits: newTraits });
+          anyNew = true;
+        }
+
+        // 2. Update relationship (roles)
+        if (relationship) {
+          console.log(`Saving relationship: ${currentPerson.name} -> ${name} (${relationship})`);
+          await db.saveRelationship(currentPerson.id, currentPerson.name, name, relationship, category, said);
+          anyNew = true;
+        }
       }
 
       if (anyNew) {
@@ -452,21 +485,9 @@ async function handlePick(index, label, text) {
   setHint('');
   speechInput.focus();
 
-  // Persist memory, extract relationships, analyse opponent — all fire-and-forget
+  // Persist memory for RAG — fire-and-forget
   if (currentPerson) {
-    // 1. Persist memory for RAG
     rag.addAndPersist(entry, db, currentPerson.id);
-
-    const model = modelInput.value.trim() || 'llama3.2';
-    extractRelationships(said, model, currentPerson.name).then(async found => {
-      for (const { name, relationship, category } of found) {
-        await db.saveRelationship(currentPerson.id, currentPerson.name, name, relationship, category, said);
-      }
-    });
-
-    extractOpponentCues(said, model).then(cues => {
-      if (cues) db.saveOpponentObservation(currentPerson.id, said, cues);
-    });
   }
 
   // Affection analysis via camera
