@@ -139,6 +139,9 @@ startSessionBtn.addEventListener('click', async () => {
   history       = [];
   affection.total = 0;
 
+  // Load all past memories for this person so RAG works across sessions
+  await rag.loadFromDB(db, person.id);
+
   renderHistory(history);
   updateAffectionMeter(0);
   showSessionBar(person.name);
@@ -262,7 +265,10 @@ async function handlePick(index, label, text) {
   history.unshift(entry);
   renderHistory(history);
 
-  rag.add(entry); // fire-and-forget; fails silently if nomic-embed-text not pulled
+  // Persist to DB so this memory survives future sessions with the same person
+  if (currentPerson) {
+    rag.addAndPersist(entry, db, currentPerson.id);
+  }
 
   speechInput.value = '';
   resetDialogue();
@@ -297,6 +303,5 @@ generateBtn.addEventListener('click', generate);
 speechInput.addEventListener('keydown', e => { if (e.key === 'Enter') generate(); });
 document.getElementById('clear-btn').addEventListener('click', () => {
   history = [];
-  rag.clear();
   renderHistory([]);
 });

@@ -2,13 +2,14 @@
  * GalGameDB — wraps IndexedDB with a clean async API.
  * No external dependencies.
  *
- * Schema (v1):
+ * Schema (v2):
  *   people        { id, name, createdAt, lastSeen, totalAffection, conversationCount }
  *   conversations { id, personId, startedAt, endedAt, exchanges[], finalAffection }
+ *   memories      { id, personId, said, text, label, cls, embedding, timestamp }
  */
 
 const DB_NAME    = 'galgame-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export class GalGameDB {
   constructor() {
@@ -32,6 +33,12 @@ export class GalGameDB {
         if (!db.objectStoreNames.contains('conversations')) {
           const cs = db.createObjectStore('conversations', { keyPath: 'id', autoIncrement: true });
           cs.createIndex('personId', 'personId', { unique: false });
+        }
+
+        // v2: persistent RAG memory per person
+        if (!db.objectStoreNames.contains('memories')) {
+          const ms = db.createObjectStore('memories', { keyPath: 'id', autoIncrement: true });
+          ms.createIndex('personId', 'personId', { unique: false });
         }
       };
 
@@ -85,6 +92,24 @@ export class GalGameDB {
       exchanges:      [...exchanges],
       finalAffection,
     });
+  }
+
+  // ── Memories (persistent RAG) ────────────────────────────────────
+
+  saveMemory(personId, exchange, embedding) {
+    return this._add('memories', {
+      personId,
+      said:      exchange.said,
+      text:      exchange.text,
+      label:     exchange.label,
+      cls:       exchange.cls,
+      embedding,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  getMemoriesForPerson(personId) {
+    return this._getAllByIndex('memories', 'personId', personId);
   }
 
   // ── Low-level helpers ────────────────────────────────────────────
