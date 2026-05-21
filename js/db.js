@@ -2,16 +2,16 @@
  * GalGameDB — wraps IndexedDB with a clean async API.
  * No external dependencies.
  *
- * Schema (v3):
- *   people        { id, name, faceDescriptor, createdAt, lastSeen, totalAffection, conversationCount }
- *   conversations { id, personId, startedAt, endedAt, exchanges[], finalAffection }
- *   memories      { id, personId, said, text, label, cls, embedding, timestamp }
- *   relationships { id, fromPersonId, fromName, toName, relationship, category, context, timestamp }
- *   memories      { id, personId, said, text, label, cls, embedding, timestamp }
+ * Schema (v4):
+ *   people               { id, name, faceDescriptor, createdAt, lastSeen, totalAffection, conversationCount }
+ *   conversations        { id, personId, startedAt, endedAt, exchanges[], finalAffection }
+ *   memories             { id, personId, said, text, label, cls, embedding, timestamp }
+ *   relationships        { id, fromPersonId, fromName, toName, relationship, category, context, timestamp }
+ *   opponentObservations { id, personId, said, cues{warmth,humor,openness,directness}, timestamp }
  */
 
 const DB_NAME    = 'galgame-db';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 export class GalGameDB {
   constructor() {
@@ -47,6 +47,12 @@ export class GalGameDB {
         if (!db.objectStoreNames.contains('relationships')) {
           const rs = db.createObjectStore('relationships', { keyPath: 'id', autoIncrement: true });
           rs.createIndex('fromPersonId', 'fromPersonId', { unique: false });
+        }
+
+        // v4: opponent personality observations
+        if (!db.objectStoreNames.contains('opponentObservations')) {
+          const os = db.createObjectStore('opponentObservations', { keyPath: 'id', autoIncrement: true });
+          os.createIndex('personId', 'personId', { unique: false });
         }
       };
 
@@ -89,20 +95,22 @@ export class GalGameDB {
   async deletePerson(id) {
     const person = await this.getPerson(id);
     const tx = this._db.transaction(
-      ['people', 'conversations', 'memories', 'relationships'],
+      ['people', 'conversations', 'memories', 'relationships', 'opponentObservations'],
       'readwrite'
     );
 
-    const people = tx.objectStore('people');
-    const conversations = tx.objectStore('conversations').index('personId');
-    const memories = tx.objectStore('memories').index('personId');
-    const relationshipsStore = tx.objectStore('relationships');
-    const relationships = relationshipsStore.index('fromPersonId');
+    const people               = tx.objectStore('people');
+    const conversations        = tx.objectStore('conversations').index('personId');
+    const memories             = tx.objectStore('memories').index('personId');
+    const relationshipsStore   = tx.objectStore('relationships');
+    const relationships        = relationshipsStore.index('fromPersonId');
+    const opponentObservations = tx.objectStore('opponentObservations').index('personId');
 
     people.delete(id);
     this._deleteByIndex(conversations, id);
     this._deleteByIndex(memories, id);
     this._deleteByIndex(relationships, id);
+    this._deleteByIndex(opponentObservations, id);
 
     if (person?.name) {
       relationshipsStore.openCursor().onsuccess = (e) => {
@@ -171,6 +179,21 @@ export class GalGameDB {
 
   getAllRelationships() {
     return this._getAll('relationships');
+  }
+
+  // ── Opponent observations ────────────────────────────────────────
+
+  saveOpponentObservation(personId, said, cues) {
+    return this._add('opponentObservations', {
+      personId,
+      said,
+      cues,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  getOpponentObservationsForPerson(personId) {
+    return this._getAllByIndex('opponentObservations', 'personId', personId);
   }
 
   // ── Low-level helpers ────────────────────────────────────────────
