@@ -7,6 +7,7 @@
  *   conversations { id, personId, startedAt, endedAt, exchanges[], finalAffection }
  *   memories      { id, personId, said, text, label, cls, embedding, timestamp }
  *   relationships { id, fromPersonId, fromName, toName, relationship, category, context, timestamp }
+ *   memories      { id, personId, said, text, label, cls, embedding, timestamp }
  */
 
 const DB_NAME    = 'galgame-db';

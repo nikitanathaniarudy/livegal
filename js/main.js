@@ -263,7 +263,19 @@ startSessionBtn.addEventListener('click', async () => {
     person = await db.getPerson(id);
   }
 
-  await startSession(person);
+  // Start the session
+  currentPerson = person;
+  sessionStart  = new Date().toISOString();
+  history       = [];
+  affection.total = 0;
+
+  // Load all past memories for this person so RAG works across sessions
+  await rag.loadFromDB(db, person.id);
+
+  renderHistory(history);
+  updateAffectionMeter(0);
+  showSessionBar(person.name);
+  speechInput.focus();
 });
 
 // ── End session ───────────────────────────────────────────────────────
@@ -284,6 +296,7 @@ endSessionBtn.addEventListener('click', async () => {
   sessionStart    = null;
   history         = [];
   affection.total = 0;
+  rag.clear();
   rag.clear();
 
   renderHistory([]);
@@ -360,6 +373,8 @@ async function generate() {
   try {
     const context = await rag.retrieve(said);
     const options = await fetchOptions(said, modelInput.value.trim() || 'llama3.2', context);
+    const context = await rag.retrieve(said);
+    const options = await fetchOptions(said, modelInput.value.trim() || 'llama3.2', context);
     renderChoices(options, handlePick);
     setStatus('');
   } catch (err) {
@@ -385,6 +400,11 @@ async function handlePick(index, label, text) {
   const entry = { said, label, text, cls };
   history.unshift(entry);
   renderHistory(history);
+
+  // Persist to DB so this memory survives future sessions with the same person
+  if (currentPerson) {
+    rag.addAndPersist(entry, db, currentPerson.id);
+  }
 
   speechInput.value = '';
   resetDialogue();
