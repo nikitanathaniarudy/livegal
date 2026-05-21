@@ -1,4 +1,5 @@
-import { RESPONSE_TYPES } from './config.js';
+import { RESPONSE_TYPES }         from './config.js';
+import { computeOpponentProfile } from './opponent.js';
 
 // ── Status dot ───────────────────────────────────────────────────────
 
@@ -256,7 +257,7 @@ export function renderDirectory(people) {
   }).join('');
 }
 
-export function renderPersonDetail(person, conversations) {
+export function renderPersonDetail(person, conversations, observations = []) {
   document.getElementById('directory-grid').classList.add('hidden');
 
   const detail = document.getElementById('person-detail');
@@ -267,16 +268,19 @@ export function renderPersonDetail(person, conversations) {
     <button class="person-detail-delete" data-person-id="${person.id}" title="Delete this person and all history">delete all</button>
   `;
 
+  const profile    = computeOpponentProfile(observations);
+  const profileHTML = opponentProfileCard(person.name, profile, observations.length);
+
   if (!conversations.length) {
-    detail.innerHTML = `<div class="directory-empty">No saved conversations yet.</div>`;
+    detail.innerHTML = profileHTML + `<div class="directory-empty" style="margin-top:16px">No saved conversations yet.</div>`;
     return;
   }
 
-  detail.innerHTML = conversations.map((c, ci) => {
-    const aff = c.finalAffection;
-    const affCls = aff > 0 ? 'pos' : aff < 0 ? 'neg' : 'zero';
+  const convsHTML = conversations.map((c, ci) => {
+    const aff     = c.finalAffection;
+    const affCls  = aff > 0 ? 'pos' : aff < 0 ? 'neg' : 'zero';
     const affSign = aff > 0 ? '+' : '';
-    const date = formatDate(c.startedAt, true);
+    const date    = formatDate(c.startedAt, true);
 
     const exchanges = (c.exchanges || []).map(ex => `
       <div class="conv-exchange">
@@ -305,13 +309,74 @@ export function renderPersonDetail(person, conversations) {
       </div>`;
   }).join('');
 
-  // Toggle expand/collapse
+  detail.innerHTML = profileHTML + convsHTML;
+
   detail.querySelectorAll('.conv-card-header').forEach(hdr => {
     hdr.addEventListener('click', () => {
-      const body = document.getElementById(`conv-body-${hdr.dataset.convIdx}`);
-      body.classList.toggle('open');
+      document.getElementById(`conv-body-${hdr.dataset.convIdx}`).classList.toggle('open');
     });
   });
+
+  // Animate opponent profile axis sliders
+  requestAnimationFrame(() => {
+    detail.querySelectorAll('.opp-axis-fill[data-opp-target]').forEach(el => {
+      el.style.width = el.dataset.oppTarget + '%';
+    });
+    detail.querySelectorAll('.opp-axis-dot[data-opp-target]').forEach(el => {
+      el.style.left = el.dataset.oppTarget + '%';
+    });
+  });
+}
+
+function opponentProfileCard(name, profile, obsCount) {
+  if (!profile) {
+    const needed = Math.max(0, 3 - obsCount);
+    return `
+      <div class="opp-profile-card opp-profile-empty">
+        <div class="opp-profile-eyebrow">their personality read</div>
+        <div class="opp-profile-pending">
+          Analysing ${name}…
+          <span class="opp-pending-count">${obsCount} observation${obsCount !== 1 ? 's' : ''} so far — ${needed} more needed for a read</span>
+        </div>
+      </div>`;
+  }
+
+  const confidencePct = Math.round(profile.confidence * 100);
+  const axisRows = profile.axes.map(ax => {
+    const pct = Math.round(ax.value * 100);
+    return `
+      <div class="gpc-axis">
+        <span class="gpc-axis-name">${ax.name}</span>
+        <div class="gpc-axis-row">
+          <span class="gpc-axis-pole gpc-axis-pole-l">${ax.left}</span>
+          <div class="gpc-axis-track">
+            <div class="opp-axis-fill" data-opp-target="${pct}" style="width:0%"></div>
+            <div class="opp-axis-dot"  data-opp-target="${pct}" style="left:0%"></div>
+          </div>
+          <span class="gpc-axis-pole gpc-axis-pole-r">${ax.right}</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="opp-profile-card">
+      <div class="opp-profile-eyebrow">their personality read</div>
+      <div class="opp-profile-header">
+        <div class="opp-type-name">${profile.type.emoji} ${profile.type.name}</div>
+        <div class="opp-confidence">
+          <span class="opp-confidence-label">${profile.count} observations · ${confidencePct}% confidence</span>
+          <div class="opp-confidence-track">
+            <div class="opp-confidence-fill" style="width:${confidencePct}%"></div>
+          </div>
+        </div>
+      </div>
+      <div class="opp-type-desc">${profile.type.desc}</div>
+      <div class="opp-tip">
+        <span class="opp-tip-label">how to approach</span>
+        ${profile.tip}
+      </div>
+      <div class="gpc-axes opp-axes">${axisRows}</div>
+    </div>`;
 }
 
 // ── Utility ──────────────────────────────────────────────────────────
@@ -358,29 +423,85 @@ export function renderAnalytics(data) {
 }
 
 function archetypeCard(data) {
-  const a    = data.archetype;
-  const emoji = a?.emoji || '🎭';
-  const name  = a?.name  || 'Unknown';
-  const desc  = a?.description || '';
+  const a   = data.archetype;
+  const gpc = data.gpc;
+
+  const emoji  = a?.emoji || gpc?.emoji || '🎭';
+  const name   = a?.name  || gpc?.name  || 'Unknown';
+  const desc   = a?.description || '';
   const traits = (a?.traits || []).map(t => `<span class="archetype-trait">${t}</span>`).join('');
 
-  const blendRows = Object.entries(data.pct).map(([label, pct]) => `
-    <div class="blend-row">
-      <span class="blend-label">${label}</span>
-      <div class="blend-bar-wrap">
-        <div class="blend-bar-fill" data-target="${(pct * 100).toFixed(0)}"
-          style="width:0%;background:${TYPE_COLORS[label]}"></div>
-      </div>
-      <span class="blend-pct">${(pct * 100).toFixed(0)}%</span>
-    </div>`).join('');
+  // GPC 4-letter code badge
+  const subLabels = ['energy', 'warmth', 'tone', 'style'];
+  const gpcBadge = gpc ? `
+    <div class="gpc-badge">
+      ${gpc.code.split('').map((ch, i) => `
+        <div class="gpc-letter-box">
+          <span class="gpc-letter-char">${ch}</span>
+          <span class="gpc-letter-sub">${subLabels[i]}</span>
+        </div>`).join('')}
+    </div>
+    <div class="gpc-type-label">${gpc.emoji} ${gpc.name}</div>
+    <div class="gpc-type-desc">${gpc.desc}</div>` : '';
+
+  // 2D personality map (SVG quadrant)
+  const qx = (90 + (data.pct.Kind - data.pct.Cold) * 78).toFixed(1);
+  const qy = (90 - (data.pct.Funny - data.pct.Sarcastic) * 78).toFixed(1);
+  const quadSVG = `
+    <div class="gpc-quad-wrap">
+      <div class="gpc-quad-eyebrow">personality map</div>
+      <svg class="gpc-quad-svg" viewBox="0 0 180 180" width="176" height="176">
+        <rect x="1"   y="1"   width="88"  height="88"  fill="rgba(110,184,200,0.07)" rx="2"/>
+        <rect x="91"  y="1"   width="88"  height="88"  fill="rgba(126,200,155,0.07)" rx="2"/>
+        <rect x="1"   y="91"  width="88"  height="88"  fill="rgba(200,125,110,0.05)" rx="2"/>
+        <rect x="91"  y="91"  width="88"  height="88"  fill="rgba(155,127,212,0.07)" rx="2"/>
+        <line x1="90" y1="4"   x2="90"  y2="176" stroke="rgba(220,200,160,0.15)" stroke-width="1"/>
+        <line x1="4"  y1="90"  x2="176" y2="90"  stroke="rgba(220,200,160,0.15)" stroke-width="1"/>
+        <text x="6"   y="11"  font-size="7" fill="rgba(220,200,160,0.4)" font-family="DM Mono,monospace">witty</text>
+        <text x="138" y="11"  font-size="7" fill="rgba(220,200,160,0.4)" font-family="DM Mono,monospace">witty</text>
+        <text x="6"   y="175" font-size="7" fill="rgba(220,200,160,0.4)" font-family="DM Mono,monospace">serious</text>
+        <text x="126" y="175" font-size="7" fill="rgba(220,200,160,0.4)" font-family="DM Mono,monospace">serious</text>
+        <text x="4"   y="87"  font-size="7" fill="rgba(220,200,160,0.4)" font-family="DM Mono,monospace">cool</text>
+        <text x="152" y="87"  font-size="7" fill="rgba(220,200,160,0.4)" font-family="DM Mono,monospace" text-anchor="end">warm</text>
+        <circle cx="${qx}" cy="${qy}" r="14" fill="var(--accent)" opacity="0.15"/>
+        <circle cx="${qx}" cy="${qy}" r="5"  fill="var(--accent)"/>
+        <circle cx="${qx}" cy="${qy}" r="5"  fill="none" stroke="var(--accent)" stroke-width="1.5" opacity="0.5"/>
+      </svg>
+    </div>`;
+
+  // Two-pole axis sliders
+  const axisSliders = gpc ? `
+    <div class="gpc-axes">
+      ${gpc.axes.map(ax => {
+        const pct = Math.round(ax.value * 100);
+        return `
+          <div class="gpc-axis">
+            <span class="gpc-axis-name">${ax.name}</span>
+            <div class="gpc-axis-row">
+              <span class="gpc-axis-pole gpc-axis-pole-l">${ax.left}</span>
+              <div class="gpc-axis-track">
+                <div class="gpc-axis-fill" data-gpc-target="${pct}" style="width:0%"></div>
+                <div class="gpc-axis-dot"  data-gpc-target="${pct}" style="left:0%"></div>
+              </div>
+              <span class="gpc-axis-pole gpc-axis-pole-r">${ax.right}</span>
+            </div>
+          </div>`;
+      }).join('')}
+    </div>` : '';
 
   return `
     <div class="archetype-card" data-emoji="${emoji}">
-      <div class="archetype-eyebrow">your personality type</div>
+      <div class="archetype-eyebrow">your gal personality type</div>
+      ${gpcBadge}
+      <div class="archetype-divider">— archetype —</div>
       <div class="archetype-name">${emoji} ${name}</div>
       <div class="archetype-desc">${desc}</div>
       <div class="archetype-traits">${traits}</div>
-      <div class="archetype-blend">${blendRows}</div>
+      <div class="archetype-divider">— personality map —</div>
+      <div class="gpc-bottom">
+        ${quadSVG}
+        ${axisSliders}
+      </div>
     </div>`;
 }
 
@@ -497,5 +618,10 @@ function trendSection(sessionTrend) {
 function animateBars(data) {
   document.querySelectorAll('.blend-bar-fill[data-target]').forEach(el => {
     el.style.width = el.dataset.target + '%';
+  });
+  document.querySelectorAll('[data-gpc-target]').forEach(el => {
+    const val = el.dataset.gpcTarget + '%';
+    if (el.classList.contains('gpc-axis-fill')) el.style.width = val;
+    if (el.classList.contains('gpc-axis-dot'))  el.style.left  = val;
   });
 }

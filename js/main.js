@@ -8,6 +8,7 @@ import { GalGameDB }           from './db.js';
 import { computeAnalytics }    from './analytics.js';
 import { ConversationRAG }     from './rag.js';
 import { extractRelationships } from './extractor.js';
+import { extractOpponentCues }  from './opponent.js';
 import { RelationshipGraph }   from './graph.js';
 import {
   setStatus, setDialogue, resetDialogue,
@@ -215,11 +216,12 @@ document.getElementById('directory-grid').addEventListener('click', async (e) =>
   const card = e.target.closest('.person-card');
   if (!card) return;
   const personId = Number(card.dataset.personId);
-  const [person, conversations] = await Promise.all([
+  const [person, conversations, observations] = await Promise.all([
     db.getPerson(personId),
     db.getConversationsForPerson(personId),
+    db.getOpponentObservationsForPerson(personId),
   ]);
-  renderPersonDetail(person, conversations);
+  renderPersonDetail(person, conversations, observations);
 });
 
 document.getElementById('directory-title').addEventListener('click', async (e) => {
@@ -450,10 +452,21 @@ async function handlePick(index, label, text) {
   setHint('');
   speechInput.focus();
 
-  // Persist memory and extract relationships — both fire-and-forget
+  // Persist memory, extract relationships, analyse opponent — all fire-and-forget
   if (currentPerson) {
     // 1. Persist memory for RAG
     rag.addAndPersist(entry, db, currentPerson.id);
+
+    const model = modelInput.value.trim() || 'llama3.2';
+    extractRelationships(said, model, currentPerson.name).then(async found => {
+      for (const { name, relationship, category } of found) {
+        await db.saveRelationship(currentPerson.id, currentPerson.name, name, relationship, category, said);
+      }
+    });
+
+    extractOpponentCues(said, model).then(cues => {
+      if (cues) db.saveOpponentObservation(currentPerson.id, said, cues);
+    });
   }
 
   // Affection analysis via camera
