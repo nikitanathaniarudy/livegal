@@ -80,7 +80,7 @@ async function recognitionLoop() {
       const match = recognition.recognize(descriptor);
       if (match) {
         const person = await db.getPerson(match.id);
-        if (person) await startSession(person);
+        if (person) await startSession(person, true);
       } else {
         const name = prompt("I don't recognize you. What is your name?");
         if (name) {
@@ -97,7 +97,7 @@ async function recognitionLoop() {
           const people = await db.getAllPeople();
           populatePersonSelect(people);
           recognition.updateKnownPeople(people);
-          await startSession(person);
+          await startSession(person, false);
         } else {
           await new Promise(r => setTimeout(r, 5000));
         }
@@ -110,7 +110,7 @@ async function recognitionLoop() {
   isRecognizing = false;
 }
 
-async function startSession(person) {
+async function startSession(person, autoRecognized = false) {
   currentPerson   = person;
   sessionStart    = new Date().toISOString();
   history         = [];
@@ -122,7 +122,13 @@ async function startSession(person) {
   renderHistory(history);
   updateAffectionMeter(0);
   showSessionBar(person.name);
-  setHint(`Hello, ${person.name}!`);
+  
+  if (autoRecognized) {
+    setHint(`Hello, ${person.name}! (Not you? End session to switch)`);
+  } else {
+    setHint(`Hello, ${person.name}!`);
+  }
+  
   speechInput.focus();
 }
 
@@ -263,19 +269,7 @@ startSessionBtn.addEventListener('click', async () => {
     person = await db.getPerson(id);
   }
 
-  // Start the session
-  currentPerson = person;
-  sessionStart  = new Date().toISOString();
-  history       = [];
-  affection.total = 0;
-
-  // Load all past memories for this person so RAG works across sessions
-  await rag.loadFromDB(db, person.id);
-
-  renderHistory(history);
-  updateAffectionMeter(0);
-  showSessionBar(person.name);
-  speechInput.focus();
+  await startSession(person, false);
 });
 
 // ── End session ───────────────────────────────────────────────────────
@@ -296,7 +290,6 @@ endSessionBtn.addEventListener('click', async () => {
   sessionStart    = null;
   history         = [];
   affection.total = 0;
-  rag.clear();
   rag.clear();
 
   renderHistory([]);
@@ -373,8 +366,6 @@ async function generate() {
   try {
     const context = await rag.retrieve(said);
     const options = await fetchOptions(said, modelInput.value.trim() || 'llama3.2', context);
-    const context = await rag.retrieve(said);
-    const options = await fetchOptions(said, modelInput.value.trim() || 'llama3.2', context);
     renderChoices(options, handlePick);
     setStatus('');
   } catch (err) {
@@ -400,11 +391,6 @@ async function handlePick(index, label, text) {
   const entry = { said, label, text, cls };
   history.unshift(entry);
   renderHistory(history);
-
-  // Persist to DB so this memory survives future sessions with the same person
-  if (currentPerson) {
-    rag.addAndPersist(entry, db, currentPerson.id);
-  }
 
   speechInput.value = '';
   resetDialogue();
