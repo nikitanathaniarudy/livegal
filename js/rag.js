@@ -82,8 +82,14 @@ export class ConversationRAG {
       return [];
     }
 
+    const n = this._entries.length;
     return this._entries
-      .map(e => ({ exchange: e.exchange, score: cosine(queryEmb, e.embedding) }))
+      .map((e, i) => {
+        const base      = cosine(queryEmb, e.embedding);
+        const recency   = (i / Math.max(1, n - 1)) * 0.15;           // up to +15% for newest
+        const affBoost  = Math.min(0.20, Math.abs(e.exchange.affectionDelta || 0) * 0.04); // up to +20% for high-impact moments
+        return { exchange: e.exchange, score: base * (1 + recency + affBoost) };
+      })
       .sort((a, b) => b.score - a.score)
       .slice(0, topK)
       .map(e => e.exchange);

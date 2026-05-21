@@ -114,27 +114,60 @@ export function renderHistory(history) {
  * Updates the affection bar and total display.
  * total ranges from -99 to +99; bar center = 0.
  */
-export function updateAffectionMeter(total) {
-  const fill = document.getElementById('affection-bar-fill');
+export function updateAffectionMeter(total, sparkData = []) {
+  const fill  = document.getElementById('affection-bar-fill');
   const label = document.getElementById('affection-total');
+  const spark = document.getElementById('affection-spark');
 
-  const pct = ((total + 99) / 198) * 100; // map -99..+99 → 0..100%
+  const pct    = ((total + 99) / 198) * 100;
   const center = 50;
 
   if (total >= 0) {
-    fill.style.left = center + '%';
-    fill.style.width = (pct - center) + '%';
-    fill.style.background = 'var(--choice-d)'; // green
+    fill.style.left       = center + '%';
+    fill.style.width      = (pct - center) + '%';
+    fill.style.background = 'var(--choice-d)';
   } else {
-    fill.style.left = pct + '%';
-    fill.style.width = (center - pct) + '%';
-    fill.style.background = 'var(--choice-c)'; // red
+    fill.style.left       = pct + '%';
+    fill.style.width      = (center - pct) + '%';
+    fill.style.background = 'var(--choice-c)';
   }
 
   label.textContent = (total > 0 ? '+' : '') + total;
-  label.style.color = total > 0
-    ? 'var(--choice-d)'
-    : total < 0 ? 'var(--choice-c)' : 'var(--ink-dim)';
+  label.style.color = total > 0 ? 'var(--choice-d)' : total < 0 ? 'var(--choice-c)' : 'var(--ink-dim)';
+
+  if (!spark) return;
+
+  if (sparkData.length < 2) {
+    spark.classList.add('hidden');
+    return;
+  }
+
+  spark.classList.remove('hidden');
+
+  const W = 300, H = 22, PAD = 2;
+  const min   = Math.min(0, ...sparkData);
+  const max   = Math.max(0, ...sparkData);
+  const range = max - min || 1;
+  const zeroY = (H - PAD - ((0 - min) / range) * (H - PAD * 2)).toFixed(1);
+  const last  = sparkData[sparkData.length - 1];
+  const color = last > 0 ? 'var(--choice-d)' : last < 0 ? 'var(--choice-c)' : 'var(--ink-dim)';
+
+  const points = sparkData.map((v, i) => {
+    const x = (PAD + (i / (sparkData.length - 1)) * (W - PAD * 2)).toFixed(1);
+    const y = (H - PAD - ((v - min) / range) * (H - PAD * 2)).toFixed(1);
+    return `${x},${y}`;
+  }).join(' ');
+
+  const lastX = (W - PAD).toFixed(1);
+  const lastY = (H - PAD - ((last - min) / range) * (H - PAD * 2)).toFixed(1);
+
+  spark.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  spark.innerHTML = `
+    <line x1="${PAD}" y1="${zeroY}" x2="${W - PAD}" y2="${zeroY}"
+      stroke="rgba(220,200,160,0.1)" stroke-width="0.5" stroke-dasharray="3 3"/>
+    <polyline points="${points}" fill="none" stroke="${color}"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.65"/>
+    <circle cx="${lastX}" cy="${lastY}" r="2.5" fill="${color}" opacity="0.9"/>`;
 }
 
 // ── Score popup ──────────────────────────────────────────────────────
@@ -257,6 +290,106 @@ export function renderDirectory(people) {
   }).join('');
 }
 
+// ── Session debrief ──────────────────────────────────────────────────
+
+export function showDebrief(exchanges, personName, totalAffection) {
+  const modal = document.getElementById('debrief-modal');
+  document.getElementById('debrief-title').textContent = `— ${personName} —`;
+  document.getElementById('debrief-body').innerHTML = buildDebriefBody(exchanges, totalAffection);
+  modal.classList.remove('hidden');
+
+  document.getElementById('debrief-body').querySelectorAll('.debrief-exchange-header').forEach(hdr => {
+    hdr.addEventListener('click', () => {
+      const alts   = hdr.parentElement.querySelector('.debrief-alts');
+      const toggle = hdr.querySelector('.debrief-alts-toggle');
+      if (!alts) return;
+      const isOpen = alts.classList.toggle('open');
+      if (toggle) toggle.textContent = isOpen ? 'hide ↑' : 'see alternatives ↓';
+    });
+  });
+}
+
+function buildDebriefBody(exchanges, totalAffection) {
+  const chron   = [...exchanges].reverse(); // exchanges are newest-first
+  const scored  = chron.filter(e => e.affectionDelta !== undefined);
+  const best    = scored.length ? scored.reduce((b, e) => e.affectionDelta > b.affectionDelta ? e : b) : null;
+  const affCls  = totalAffection > 0 ? 'pos' : totalAffection < 0 ? 'neg' : '';
+  const affSign = totalAffection > 0 ? '+' : '';
+
+  const statsHTML = `
+    <div class="debrief-stats">
+      <div class="debrief-stat">
+        <span class="debrief-stat-label">exchanges</span>
+        <span class="debrief-stat-value">${chron.length}</span>
+      </div>
+      <div class="debrief-stat">
+        <span class="debrief-stat-label">total affection</span>
+        <span class="debrief-stat-value ${affCls}">${affSign}${totalAffection}</span>
+      </div>
+      <div class="debrief-stat">
+        <span class="debrief-stat-label">best moment</span>
+        <span class="debrief-stat-value">${best ? `${best.emoji || ''} ${best.label}` : '—'}</span>
+      </div>
+    </div>`;
+
+  const timelineHTML = chron.map((ex, i) => {
+    const hasDelta = ex.affectionDelta !== undefined;
+    const deltaCls = hasDelta ? (ex.affectionDelta > 0 ? 'pos' : ex.affectionDelta < 0 ? 'neg' : 'zero') : '';
+    const deltaSign = ex.affectionDelta > 0 ? '+' : '';
+    const dotCls   = hasDelta ? (ex.affectionDelta > 0 ? 'good' : ex.affectionDelta < 0 ? 'bad' : 'neutral') : 'neutral';
+    const isLast   = i === chron.length - 1;
+
+    const altsHTML = ex.options?.length === 4
+      ? ex.options
+          .filter((_, oi) => oi !== ex.chosenIndex)
+          .map(opt => {
+            const cls = RESPONSE_TYPES.find(t => t.label === opt.label)?.cls || 'a';
+            return `
+              <div class="debrief-alt">
+                <span class="choice-tag ${cls}">${opt.label}</span>
+                <span class="debrief-alt-text">${opt.text}</span>
+              </div>`;
+          }).join('')
+      : '';
+
+    const hasAlts = altsHTML.length > 0;
+
+    return `
+      <div class="debrief-exchange${hasAlts ? ' has-alts' : ''}">
+        <div class="debrief-node-col">
+          <div class="debrief-dot debrief-dot-${dotCls}"></div>
+          ${!isLast ? '<div class="debrief-line"></div>' : ''}
+        </div>
+        <div class="debrief-content">
+          <div class="debrief-said">${ex.said}</div>
+          <div class="debrief-exchange-header">
+            <div class="debrief-chosen">
+              <span class="choice-tag ${ex.cls}">${ex.label}</span>
+              <span class="debrief-chosen-text">${ex.text}</span>
+            </div>
+            <div class="debrief-chosen-meta">
+              ${hasDelta ? `<span class="debrief-delta ${deltaCls}">${ex.emoji || ''} ${deltaSign}${ex.affectionDelta}</span>` : ''}
+              ${hasAlts ? `<span class="debrief-alts-toggle">see alternatives ↓</span>` : ''}
+            </div>
+          </div>
+          ${hasAlts ? `<div class="debrief-alts">${altsHTML}</div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+
+  return statsHTML + `<div class="debrief-timeline">${timelineHTML}</div>`;
+}
+
+// Close handlers — run once at module load
+document.getElementById('debrief-close')?.addEventListener('click', () => {
+  document.getElementById('debrief-modal')?.classList.add('hidden');
+});
+document.getElementById('debrief-backdrop')?.addEventListener('click', () => {
+  document.getElementById('debrief-modal')?.classList.add('hidden');
+});
+
+// ── Directory: person detail ─────────────────────────────────────────
+
 export function renderPersonDetail(person, conversations, observations = []) {
   document.getElementById('directory-grid').classList.add('hidden');
 
@@ -301,6 +434,7 @@ export function renderPersonDetail(person, conversations, observations = []) {
           <div class="conv-card-stats">
             <span class="conv-stat">exchanges <span>${c.exchanges?.length || 0}</span></span>
             <span class="conv-affection ${affCls}">${affSign}${aff}</span>
+            <button class="conv-review-btn" data-conv-idx="${ci}">review</button>
           </div>
         </div>
         <div class="conv-card-body" id="conv-body-${ci}">
@@ -312,8 +446,18 @@ export function renderPersonDetail(person, conversations, observations = []) {
   detail.innerHTML = profileHTML + convsHTML;
 
   detail.querySelectorAll('.conv-card-header').forEach(hdr => {
-    hdr.addEventListener('click', () => {
+    hdr.addEventListener('click', (e) => {
+      if (e.target.closest('.conv-review-btn')) return;
       document.getElementById(`conv-body-${hdr.dataset.convIdx}`).classList.toggle('open');
+    });
+  });
+
+  detail.querySelectorAll('.conv-review-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ci   = Number(btn.dataset.convIdx);
+      const conv = conversations[ci];
+      showDebrief(conv.exchanges || [], person.name, conv.finalAffection || 0);
     });
   });
 
@@ -330,7 +474,7 @@ export function renderPersonDetail(person, conversations, observations = []) {
 
 function opponentProfileCard(name, profile, obsCount) {
   if (!profile) {
-    const needed = Math.max(0, 3 - obsCount);
+    const needed = Math.max(0, 5 - obsCount);
     return `
       <div class="opp-profile-card opp-profile-empty">
         <div class="opp-profile-eyebrow">their personality read</div>

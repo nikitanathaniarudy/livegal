@@ -9,6 +9,7 @@ import { computeAnalytics }    from './analytics.js';
 import { ConversationRAG }     from './rag.js';
 import { extractRelationships } from './extractor.js';
 import { extractOpponentCues }  from './opponent.js';
+import { showDebrief }          from './ui.js';
 import { RelationshipGraph }   from './graph.js';
 import {
   setStatus, setDialogue, resetDialogue,
@@ -31,10 +32,11 @@ let   graph       = null;   // lazy-init when Network tab first opens
 
 // ── Session state ─────────────────────────────────────────────────────
 
-let history       = [];
-let currentPerson = null;
-let sessionStart  = null;
-let isRecognizing = false;
+let history        = [];
+let currentPerson  = null;
+let sessionStart   = null;
+let isRecognizing  = false;
+let pendingOptions = []; // all 4 choices from the most recent generate()
 
 // ── DOM refs ──────────────────────────────────────────────────────────
 
@@ -297,6 +299,11 @@ startSessionBtn.addEventListener('click', async () => {
 endSessionBtn.addEventListener('click', async () => {
   if (!currentPerson) return;
 
+  // Capture before clearing
+  const sessionExchanges  = [...history];
+  const sessionPersonName = currentPerson.name;
+  const sessionAffection  = affection.total;
+
   if (history.length > 0) {
     await db.saveConversation(currentPerson.id, history, affection.total, sessionStart);
     await db.updatePerson(currentPerson.id, {
@@ -310,6 +317,7 @@ endSessionBtn.addEventListener('click', async () => {
   sessionStart    = null;
   history         = [];
   affection.total = 0;
+  pendingOptions  = [];
   rag.clear();
 
   renderHistory([]);
@@ -321,6 +329,10 @@ endSessionBtn.addEventListener('click', async () => {
   const people = await db.getAllPeople();
   populatePersonSelect(people);
   recognition.updateKnownPeople(people);
+
+  if (sessionExchanges.length > 0) {
+    showDebrief(sessionExchanges, sessionPersonName, sessionAffection);
+  }
 });
 
 // ── Camera ────────────────────────────────────────────────────────────
@@ -419,6 +431,7 @@ async function generate() {
   try {
     const context = await rag.retrieve(said);
     const options = await fetchOptions(said, modelInput.value.trim() || 'llama3.2', context);
+    pendingOptions = options;
     renderChoices(options, handlePick);
     setStatus('');
   } catch (err) {
@@ -441,7 +454,7 @@ async function handlePick(index, label, text) {
   const said = speechInput.value.trim()
     || document.getElementById('dialogue-display').textContent;
 
-  const entry = { said, label, text, cls };
+  const entry = { said, label, text, cls, chosenIndex: index, options: [...pendingOptions] };
   history.unshift(entry);
   renderHistory(history);
 
@@ -480,10 +493,17 @@ async function handlePick(index, label, text) {
     setHint('');
 
     const total = affection.apply(result.delta);
-    updateAffectionMeter(total);
-    showScorePopup(result.delta, result.dominant, EXPRESSION_EMOJI);
-
     entry.affectionDelta = result.delta;
+
+    const sparkData = [...history].reverse()
+      .reduce((acc, e) => {
+        if (e.affectionDelta !== undefined)
+          acc.push((acc.length ? acc[acc.length - 1] : 0) + e.affectionDelta);
+        return acc;
+      }, []);
+
+    updateAffectionMeter(total, sparkData);
+    showScorePopup(result.delta, result.dominant, EXPRESSION_EMOJI);
     entry.emoji          = EXPRESSION_EMOJI[result.dominant] || '😐';
     renderHistory(history);
   }
