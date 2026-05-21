@@ -11,8 +11,8 @@ import { OLLAMA_URL, RESPONSE_TYPES } from './config.js';
  * @param {string} model
  * @param {Array}  context - relevant past exchanges from RAG (may be empty)
  */
-export async function fetchOptions(said, model, context = []) {
-  const prompt = buildPrompt(said, context);
+export async function fetchOptions(said, model, context = [], relationships = []) {
+  const prompt = buildPrompt(said, context, relationships);
 
   const res = await fetch(OLLAMA_URL, {
     method: 'POST',
@@ -35,7 +35,7 @@ export async function fetchOptions(said, model, context = []) {
   return options;
 }
 
-function buildPrompt(said, context) {
+function buildPrompt(said, context, relationships = []) {
   const labels = RESPONSE_TYPES.map(t => t.label).join(', ');
 
   const contextBlock = context.length
@@ -46,10 +46,30 @@ function buildPrompt(said, context) {
       }\nUse this as memory — if the current message references something from above, acknowledge it naturally.\n`
     : '';
 
-  return `You are generating response options for a real-life visual novel / galgame simulator.${contextBlock}
+  // Deduplicate relationships by person name, keep most recent per name
+  const relMap = {};
+  for (const r of relationships) {
+    if (!relMap[r.toName] || r.timestamp > relMap[r.toName].timestamp) {
+      relMap[r.toName] = r;
+    }
+  }
+  const relList = Object.values(relMap)
+    .sort((a, b) => {
+      const priority = { romantic: 0, family: 1, friend: 2, work: 3, other: 4 };
+      return (priority[a.category] ?? 4) - (priority[b.category] ?? 4);
+    })
+    .slice(0, 8);
+
+  const relationshipBlock = relList.length
+    ? `\nKnown facts about this person's life (from previous conversations):\n${
+        relList.map(r => `- ${r.toName}: ${r.relationship || 'someone they know'} (${r.category})`).join('\n')
+      }\nIf the current message involves any of these people or conflicts with these relationships (e.g. expressing attraction while in a relationship, mentioning someone they dislike), factor this into your responses — at least one option should address the situation directly.\n`
+    : '';
+
+  return `You are generating response options for a real-life visual novel / galgame simulator.${contextBlock}${relationshipBlock}
 Someone just said to you: "${said.replace(/"/g, "'")}"
 
-Generate exactly 4 short response options (1-2 sentences each). If the current message references facts or names from the conversation memory above, use them in your responses.
+Generate exactly 4 short response options (1-2 sentences each). Use names, relationships, and context above where relevant.
 CRITICAL RULES:
 - Do NOT use double-quote characters inside any response text. Use single quotes (') instead.
 - Do NOT use backslashes.

@@ -182,6 +182,10 @@ export class GalGameDB {
     return this._getAll('relationships');
   }
 
+  getRelationshipsForPerson(personId) {
+    return this._getAllByIndex('relationships', 'fromPersonId', personId);
+  }
+
   // ── Opponent observations ────────────────────────────────────────
 
   saveOpponentObservation(personId, said, cues) {

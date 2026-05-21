@@ -462,8 +462,11 @@ async function generate() {
   }
 
   try {
-    const context = await rag.retrieve(said);
-    const options = await fetchOptions(said, modelInput.value.trim() || 'llama3.2', context);
+    const [context, relationships] = await Promise.all([
+      rag.retrieve(said),
+      currentPerson ? db.getRelationshipsForPerson(currentPerson.id) : Promise.resolve([]),
+    ]);
+    const options = await fetchOptions(said, modelInput.value.trim() || 'llama3.2', context, relationships);
     pendingOptions = options;
     renderChoices(options, handlePick);
     setStatus('');
