@@ -50,10 +50,16 @@ export class GalGameDB {
     return this._get('people', id);
   }
 
-  createPerson(name) {
+  async getPersonByName(name) {
+    const all = await this._getAllByIndex('people', 'name', name);
+    return all[0] || null;
+  }
+
+  createPerson(name, faceDescriptor = null) {
     const now = new Date().toISOString();
     return this._add('people', {
       name,
+      faceDescriptor,
       createdAt:         now,
       lastSeen:          now,
       totalAffection:    0,
@@ -63,6 +69,22 @@ export class GalGameDB {
 
   updatePerson(id, changes) {
     return this._update('people', id, changes);
+  }
+
+  async deletePerson(id) {
+    // Delete all conversations for this person first
+    const convs = await this.getConversationsForPerson(id);
+    const tx = this._db.transaction(['people', 'conversations'], 'readwrite');
+    const personStore = tx.objectStore('people');
+    const convStore = tx.objectStore('conversations');
+
+    convs.forEach(c => convStore.delete(c.id));
+    personStore.delete(id);
+
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
   }
 
   // ── Conversations ────────────────────────────────────────────────

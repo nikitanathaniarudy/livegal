@@ -236,6 +236,7 @@ export function renderDirectory(people) {
 
     return `
       <div class="person-card affection-${affCls}" data-person-id="${p.id}">
+        <button class="person-card-delete" data-person-id="${p.id}" title="Delete person">×</button>
         <div class="person-card-name">${p.name}</div>
         <div class="person-card-meta">
           <div class="person-meta-item">
@@ -261,7 +262,10 @@ export function renderPersonDetail(person, conversations) {
   const detail = document.getElementById('person-detail');
   detail.classList.remove('hidden');
   document.getElementById('dir-back-btn').classList.remove('hidden');
-  document.getElementById('directory-title').textContent = `— ${person.name} —`;
+  document.getElementById('directory-title').innerHTML = `
+    — ${person.name} —
+    <button class="person-detail-delete" data-person-id="${person.id}" title="Delete this person and all history">delete all</button>
+  `;
 
   if (!conversations.length) {
     detail.innerHTML = `<div class="directory-empty">No saved conversations yet.</div>`;

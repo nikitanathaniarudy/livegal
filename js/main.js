@@ -3,6 +3,7 @@ import { fetchOptions }    from './llm.js';
 import { SpeechInput }     from './speech.js';
 import { Camera }          from './camera.js';
 import { AffectionTracker, EXPRESSION_EMOJI } from './affection.js';
+import { RecognitionTracker } from './recognition.js';
 import { GalGameDB }       from './db.js';
 import { computeAnalytics } from './analytics.js';
 import {
@@ -17,15 +18,17 @@ import {
 
 // ── Core objects ──────────────────────────────────────────────────────
 
-const db        = new GalGameDB();
-const camera    = new Camera();
-const affection = new AffectionTracker();
+const db          = new GalGameDB();
+const camera      = new Camera();
+const affection   = new AffectionTracker();
+const recognition = new RecognitionTracker();
 
 // ── Session state ─────────────────────────────────────────────────────
 
 let history       = [];
 let currentPerson = null;   // person object from DB
 let sessionStart  = null;   // ISO string
+let isRecognizing = false;
 
 // ── DOM refs ──────────────────────────────────────────────────────────
 
@@ -46,10 +49,78 @@ async function init() {
   await db.open();
   const people = await db.getAllPeople();
   populatePersonSelect(people);
+  recognition.updateKnownPeople(people);
   updateAffectionMeter(0);
 }
 
 init();
+
+// ── Recognition Loop ──────────────────────────────────────────────────
+
+async function recognitionLoop() {
+  if (isRecognizing) return;
+  isRecognizing = true;
+
+  while (camera.isRunning) {
+    if (currentPerson || !recognition.isLoaded) {
+      await new Promise(r => setTimeout(r, 1000));
+      continue;
+    }
+
+    setCameraAnalyzing(true);
+    const descriptor = await recognition.getDescriptor(cameraFeed);
+    setCameraAnalyzing(false);
+
+    if (descriptor) {
+      const match = recognition.recognize(descriptor);
+      if (match) {
+        startSession(match);
+      } else {
+        // New person encountered
+        setHint('Who are you? (Type name in the box or I will ask)');
+        const name = prompt("I don't recognize you. What is your name?");
+        if (name) {
+          const existing = await db.getPersonByName(name);
+          let person;
+          if (existing) {
+            // Use existing and update descriptor if missing
+            person = existing;
+            if (!person.faceDescriptor) {
+              person = await db.updatePerson(person.id, { faceDescriptor: Array.from(descriptor) });
+            }
+          } else {
+            person = await db.createPerson(name, Array.from(descriptor));
+          }
+          
+          const people = await db.getAllPeople();
+          populatePersonSelect(people);
+          recognition.updateKnownPeople(people);
+          startSession(person);
+        } else {
+          // If they cancel prompt, wait a bit before trying again
+          await new Promise(r => setTimeout(r, 5000));
+        }
+      }
+    }
+
+    await new Promise(r => setTimeout(r, 2000));
+  }
+
+  isRecognizing = false;
+}
+
+function startSession(person) {
+  currentPerson = person;
+  sessionStart  = new Date().toISOString();
+  history       = [];
+  affection.total = 0;
+
+  renderHistory(history);
+  updateAffectionMeter(0);
+  showSessionBar(person.name);
+  setHint(`Hello, ${person.name}!`);
+  speechInput.focus();
+}
 
 // ── Navigation ────────────────────────────────────────────────────────
 
@@ -86,6 +157,20 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
 // ── Directory interactions ────────────────────────────────────────────
 
 document.getElementById('directory-grid').addEventListener('click', async (e) => {
+  const delBtn = e.target.closest('.person-card-delete');
+  if (delBtn) {
+    e.stopPropagation();
+    const personId = Number(delBtn.dataset.personId);
+    if (confirm('Are you sure you want to delete this person and all their conversation history?')) {
+      await db.deletePerson(personId);
+      const people = await db.getAllPeople();
+      renderDirectory(people);
+      populatePersonSelect(people);
+      recognition.updateKnownPeople(people);
+    }
+    return;
+  }
+
   const card = e.target.closest('.person-card');
   if (!card) return;
   const personId = Number(card.dataset.personId);
@@ -94,6 +179,20 @@ document.getElementById('directory-grid').addEventListener('click', async (e) =>
     db.getConversationsForPerson(personId),
   ]);
   renderPersonDetail(person, conversations);
+});
+
+document.getElementById('directory-title').addEventListener('click', async (e) => {
+  const delBtn = e.target.closest('.person-detail-delete');
+  if (!delBtn) return;
+  
+  const personId = Number(delBtn.dataset.personId);
+  if (confirm('Are you sure you want to delete this person and all their conversation history?')) {
+    await db.deletePerson(personId);
+    const people = await db.getAllPeople();
+    renderDirectory(people);
+    populatePersonSelect(people);
+    recognition.updateKnownPeople(people);
+  }
 });
 
 document.getElementById('dir-back-btn').addEventListener('click', async () => {
@@ -117,7 +216,24 @@ startSessionBtn.addEventListener('click', async () => {
     // New person flow
     const name = personNameInput.value.trim();
     if (!name) { personNameInput.focus(); return; }
-    person = await db.createPerson(name);
+    
+    // Capture descriptor if camera is on
+    let descriptor = null;
+    if (camera.isRunning && recognition.isLoaded) {
+      setCameraAnalyzing(true);
+      descriptor = await recognition.getDescriptor(cameraFeed);
+      setCameraAnalyzing(false);
+    }
+    
+    const existing = await db.getPersonByName(name);
+    if (existing) {
+      person = existing;
+      if (!person.faceDescriptor && descriptor) {
+        person = await db.updatePerson(person.id, { faceDescriptor: Array.from(descriptor) });
+      }
+    } else {
+      person = await db.createPerson(name, descriptor ? Array.from(descriptor) : null);
+    }
 
     // Add to dropdown and reset selector UI
     personNameInput.style.display = 'none';
@@ -125,22 +241,14 @@ startSessionBtn.addEventListener('click', async () => {
     personSelect.value            = '';
     const people = await db.getAllPeople();
     populatePersonSelect(people);
+    recognition.updateKnownPeople(people);
   } else {
     const id = Number(personSelect.value);
     if (!id) return;
     person = await db.getPerson(id);
   }
 
-  // Start the session
-  currentPerson = person;
-  sessionStart  = new Date().toISOString();
-  history       = [];
-  affection.total = 0;
-
-  renderHistory(history);
-  updateAffectionMeter(0);
-  showSessionBar(person.name);
-  speechInput.focus();
+  startSession(person);
 });
 
 // ── End session ───────────────────────────────────────────────────────
@@ -172,6 +280,7 @@ endSessionBtn.addEventListener('click', async () => {
   // Refresh dropdown
   const people = await db.getAllPeople();
   populatePersonSelect(people);
+  recognition.updateKnownPeople(people);
 });
 
 // ── Camera ────────────────────────────────────────────────────────────
@@ -182,7 +291,8 @@ cameraStartBtn.addEventListener('click', async () => {
   try {
     await camera.start(cameraFeed);
     hideCameraOverlay();
-    await loadAffectionModels();
+    await loadModels();
+    recognitionLoop();
   } catch (err) {
     cameraStartBtn.disabled = false;
     setCameraOverlayHint(
@@ -193,11 +303,15 @@ cameraStartBtn.addEventListener('click', async () => {
   }
 });
 
-async function loadAffectionModels() {
+async function loadModels() {
   try {
-    await affection.load(msg => setCameraOverlayHint(msg));
+    // Load both affection and recognition models
+    await Promise.all([
+      affection.load(msg => setCameraOverlayHint(msg)),
+      recognition.load(msg => setCameraOverlayHint(msg))
+    ]);
   } catch (err) {
-    setCameraOverlayHint('Face models failed: ' + err.message);
+    setCameraOverlayHint('Models failed: ' + err.message);
   }
 }
 
