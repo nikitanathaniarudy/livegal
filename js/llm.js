@@ -61,18 +61,20 @@ function buildPrompt(said, context, relationships = []) {
     .slice(0, 8);
 
   const relationshipBlock = relList.length
-    ? `\nKnown facts about this person's life (from previous conversations):\n${
+    ? `\nBackground facts about this person (use only to inform your tone and awareness — never invent events):\n${
         relList.map(r => `- ${r.toName}: ${r.relationship || 'someone they know'} (${r.category})`).join('\n')
-      }\nIf the current message involves any of these people or conflicts with these relationships (e.g. expressing attraction while in a relationship, mentioning someone they dislike), factor this into your responses — at least one option should address the situation directly.\n`
+      }\nOnly reference these people if the current message directly mentions them or if their relationship is clearly relevant. Do NOT fabricate events, history, or drama involving these names.\n`
     : '';
 
   return `You are generating response options for a real-life visual novel / galgame simulator.${contextBlock}${relationshipBlock}
 Someone just said to you: "${said.replace(/"/g, "'")}"
 
-Generate exactly 4 short response options (1-2 sentences each). Use names, relationships, and context above where relevant.
+Generate exactly 4 short response options (1-2 sentences each).
 CRITICAL RULES:
 - Do NOT use double-quote characters inside any response text. Use single quotes (') instead.
 - Do NOT use backslashes.
+- NEVER invent or assume events, facts, or history not explicitly stated in the conversation above (e.g. do NOT say things like "didn't X dump you" or "I heard X did Y" unless it was actually said).
+- Only mention people from the background facts if the current message is directly about them.
 - Return ONLY raw JSON, no markdown, no code blocks, no explanation.
 
 Format exactly like this:

@@ -2,6 +2,7 @@
 export const OLLAMA_URL  = 'http://localhost:11434/api/chat';
 export const EMBED_URL   = 'http://localhost:11434/api/embeddings';
 export const EMBED_MODEL = 'nomic-embed-text';
+export const DEFAULT_MODEL = 'llama3.1:8b';
 
 // Response type labels and their CSS classes (order matters — maps to choices)
 export const RESPONSE_TYPES = [

@@ -1,4 +1,4 @@
-import { RESPONSE_TYPES } from './config.js';
+import { RESPONSE_TYPES, DEFAULT_MODEL } from './config.js';
 import { fetchOptions }    from './llm.js';
 import { SpeechInput }     from './speech.js';
 import { Camera }          from './camera.js';
@@ -50,6 +50,10 @@ const personSelect    = document.getElementById('person-select');
 const personNameInput = document.getElementById('person-name-input');
 const startSessionBtn = document.getElementById('start-session-btn');
 const endSessionBtn   = document.getElementById('end-session-btn');
+const facePrompt      = document.getElementById('face-prompt');
+const facePromptInput = document.getElementById('face-prompt-input');
+const facePromptOk    = document.getElementById('face-prompt-ok');
+const facePromptSkip  = document.getElementById('face-prompt-skip');
 
 // ── Init ──────────────────────────────────────────────────────────────
 
@@ -85,9 +89,9 @@ async function recognitionLoop() {
         const person = await db.getPerson(match.id);
         if (person) await startSession(person, true);
       } else {
-        const nameInput = prompt("I don't recognize you. What is your name?");
+        const nameInput = await askFaceName();
         if (nameInput) {
-          const name = toTitleCase(nameInput.trim());
+          const name = toTitleCase(nameInput);
           const existing = await db.getPersonByName(name);
           let person;
           if (existing) {
@@ -112,6 +116,30 @@ async function recognitionLoop() {
   }
 
   isRecognizing = false;
+}
+
+function askFaceName() {
+  return new Promise(resolve => {
+    facePromptInput.value = '';
+    facePrompt.classList.remove('hidden');
+    facePromptInput.focus();
+
+    const done = (name) => {
+      facePrompt.classList.add('hidden');
+      facePromptOk.removeEventListener('click', onOk);
+      facePromptSkip.removeEventListener('click', onSkip);
+      facePromptInput.removeEventListener('keydown', onKey);
+      resolve(name || null);
+    };
+
+    const onOk   = () => done(facePromptInput.value.trim());
+    const onSkip = () => done(null);
+    const onKey  = (e) => { if (e.key === 'Enter') done(facePromptInput.value.trim()); };
+
+    facePromptOk.addEventListener('click', onOk);
+    facePromptSkip.addEventListener('click', onSkip);
+    facePromptInput.addEventListener('keydown', onKey);
+  });
 }
 
 function toTitleCase(str) {
@@ -408,7 +436,7 @@ async function generate() {
 
   // Extract relationships and discovery immediately in background
   if (currentPerson) {
-    const model = modelInput.value.trim() || 'llama3.2';
+    const model = modelInput.value.trim() || DEFAULT_MODEL;
     console.log(`Extracting relationships from: "${said}" (Speaker: ${currentPerson.name})`);
     extractRelationships(said, model, currentPerson.name).then(async found => {
       let anyNew = false;
@@ -466,7 +494,7 @@ async function generate() {
       rag.retrieve(said),
       currentPerson ? db.getRelationshipsForPerson(currentPerson.id) : Promise.resolve([]),
     ]);
-    const options = await fetchOptions(said, modelInput.value.trim() || 'llama3.2', context, relationships);
+    const options = await fetchOptions(said, modelInput.value.trim() || DEFAULT_MODEL, context, relationships);
     pendingOptions = options;
     renderChoices(options, handlePick);
     setStatus('');
@@ -474,7 +502,7 @@ async function generate() {
     setStatus('error');
     const isNetwork = err.message.includes('fetch') || err.message.includes('Failed');
     showError(isNetwork
-      ? `Cannot reach Ollama at localhost:11434.<br><br>Run: <strong>ollama serve</strong> then <strong>ollama pull llama3.2</strong>`
+      ? `Cannot reach Ollama at localhost:11434.<br><br>Run: <strong>ollama serve</strong> then <strong>ollama pull ${DEFAULT_MODEL}</strong>`
       : err.message
     );
     showEmptyChoices('Error generating options — see above');
@@ -504,6 +532,12 @@ async function handlePick(index, label, text) {
   // Persist memory for RAG — fire-and-forget
   if (currentPerson) {
     rag.addAndPersist(entry, db, currentPerson.id);
+
+    // Opponent personality cue extraction — fire-and-forget
+    const model = modelInput.value.trim() || DEFAULT_MODEL;
+    extractOpponentCues(said, model).then(cues => {
+      if (cues) db.saveOpponentObservation(currentPerson.id, said, cues);
+    });
   }
 
   // Affection analysis via camera

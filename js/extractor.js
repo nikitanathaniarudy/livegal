@@ -65,6 +65,8 @@ const WORD_BLACKLIST = new Set([
   'Later', 'Today', 'Tomorrow', 'Yesterday', 'Someday', 'Always', 'Never',
   'Something', 'Nothing', 'Everything', 'Anything', 'Somewhere', 'Nowhere',
   'Introducer', 'Presenter', 'Friend', 'Buddy', 'Boss', 'Manager', 'Colleague',
+  'Boyfriend', 'Girlfriend', 'Partner', 'Spouse', 'Husband', 'Wife',
+  'Lover', 'Crush', 'Fiance', 'Fiancee', 'Ex', 'Coworker', 'Teammate',
 ]);
 
 function validate(item, said = '') {

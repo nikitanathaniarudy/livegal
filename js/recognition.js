@@ -42,14 +42,14 @@ export class RecognitionTracker {
       .map(p => ({
         id: p.id,
         name: p.name,
-        descriptor: new Float32Array(Object.values(p.faceDescriptor))
+        descriptor: new Float32Array(Array.from(p.faceDescriptor))
       }));
 
     if (this.knownPeople.length > 0) {
       const labeledDescriptors = this.knownPeople.map(p => 
         new faceapi.LabeledFaceDescriptors(String(p.id), [p.descriptor])
       );
-      this.matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.45); // 0.45 distance threshold (stricter)
+      this.matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
     } else {
       this.matcher = null;
     }

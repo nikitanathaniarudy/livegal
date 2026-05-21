@@ -20,7 +20,7 @@
     <div class="model-pill">
       <div class="status-dot" id="status-dot"></div>
       <span>model:</span>
-      <input type="text" id="model-input" value="llama3.2" spellcheck="false" title="Ollama model name"/>
+      <input type="text" id="model-input" value="llama3.1:8b" spellcheck="false" title="Ollama model name"/>
     </div>
   </header>
 
@@ -72,6 +72,12 @@
               <div class="camera-overlay-hint" id="camera-overlay-hint"></div>
             </div>
             <div class="score-popup" id="score-popup"></div>
+            <div class="face-prompt hidden" id="face-prompt">
+              <span class="face-prompt-label">Who is this?</span>
+              <input type="text" id="face-prompt-input" placeholder="their name…" spellcheck="false"/>
+              <button id="face-prompt-ok">OK</button>
+              <button id="face-prompt-skip">Skip</button>
+            </div>
           </div>
           <div class="affection-meter">
             <span class="affection-label">affection</span>

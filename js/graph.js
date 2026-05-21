@@ -9,6 +9,20 @@ const MAX_TICKS  = 1500;   // Allow longer for complex graphs to settle
 const R_DB       = 28;
 const R_MENTION  = 18;
 
+const ROMANTIC_TERMS = new Set([
+  'boyfriend', 'girlfriend', 'partner', 'lover', 'fiance', 'fiancee',
+  'fiancé', 'fiancée', 'ex', 'ex-boyfriend', 'ex-girlfriend', 'crush',
+]);
+const SPOUSE_TERMS = new Set(['husband', 'wife', 'spouse', 'married']);
+
+function normalizeRelLabel(rel) {
+  if (!rel) return 'connection';
+  const r = rel.toLowerCase().trim();
+  if (SPOUSE_TERMS.has(r))  return 'spouse';
+  if (ROMANTIC_TERMS.has(r)) return 'romantic partner';
+  return rel;
+}
+
 const CAT_COLOR = {
   friend:   '#6eb8c8',
   family:   '#9b7fd4',
@@ -216,7 +230,7 @@ export class RelationshipGraph {
 
       // Label at midpoint (only if not too crowded or on hover? let's keep it subtle)
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-      const labelText = e.labels.join(', ');
+      const labelText = e.labels.map(normalizeRelLabel).join(', ');
       ctx.font = '8px DM Mono, monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -292,7 +306,7 @@ export class RelationshipGraph {
       const traits = p.traits || [];
       const roles = this._edges
         .filter(e => e.from === p.label || e.to === p.label)
-        .map(e => e.labels.join(', '))
+        .map(e => e.labels.map(normalizeRelLabel).join(', '))
         .join(', ');
 
       const panelW = 160;
