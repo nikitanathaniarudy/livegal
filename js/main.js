@@ -82,8 +82,9 @@ async function recognitionLoop() {
         const person = await db.getPerson(match.id);
         if (person) await startSession(person, true);
       } else {
-        const name = prompt("I don't recognize you. What is your name?");
-        if (name) {
+        const nameInput = prompt("I don't recognize you. What is your name?");
+        if (nameInput) {
+          const name = toTitleCase(nameInput.trim());
           const existing = await db.getPersonByName(name);
           let person;
           if (existing) {
@@ -110,11 +111,17 @@ async function recognitionLoop() {
   isRecognizing = false;
 }
 
+function toTitleCase(str) {
+  return str.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+}
+
 async function startSession(person, autoRecognized = false) {
   currentPerson   = person;
   sessionStart    = new Date().toISOString();
   history         = [];
   affection.total = 0;
+
+  console.log(`Starting session with: ${person.name} (Auto: ${autoRecognized})`);
 
   // Load all past memories for this person (cross-session RAG)
   await rag.loadFromDB(db, person.id);
@@ -127,6 +134,16 @@ async function startSession(person, autoRecognized = false) {
     setHint(`Hello, ${person.name}! (Not you? End session to switch)`);
   } else {
     setHint(`Hello, ${person.name}!`);
+  }
+
+  // Refresh graph if we are on that tab to show the active highlight
+  const networkTab = document.querySelector('.nav-tab[data-view="network"]');
+  if (networkTab && networkTab.classList.contains('active')) {
+    const [people, relationships] = await Promise.all([
+      db.getAllPeople(),
+      db.getAllRelationships(),
+    ]);
+    if (graph) graph.setData(people, relationships, person.name);
   }
   
   speechInput.focus();
@@ -173,7 +190,7 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
 
       const hasData = people.length > 0 || relationships.length > 0;
       emptyEl.classList.toggle('hidden', hasData);
-      if (hasData) graph.setData(people, relationships);
+      if (hasData) graph.setData(people, relationships, currentPerson?.name);
     }
   });
 });
@@ -237,8 +254,9 @@ startSessionBtn.addEventListener('click', async () => {
   let person;
 
   if (personSelect.style.display === 'none') {
-    const name = personNameInput.value.trim();
-    if (!name) { personNameInput.focus(); return; }
+    const rawName = personNameInput.value.trim();
+    if (!rawName) { personNameInput.focus(); return; }
+    const name = toTitleCase(rawName);
 
     let descriptor = null;
     if (camera.isRunning && recognition.isLoaded) {
@@ -363,6 +381,39 @@ async function generate() {
   setDialogue(said);
   showShimmer();
 
+  // Extract relationships and discovery immediately in background
+  if (currentPerson) {
+    const model = modelInput.value.trim() || 'llama3.2';
+    console.log(`Extracting relationships from: "${said}" (Speaker: ${currentPerson.name})`);
+    extractRelationships(said, model, currentPerson.name).then(async found => {
+      let anyNew = false;
+      for (const { name, relationship, category } of found) {
+        let mentionedPerson = await db.getPersonByName(name);
+        if (!mentionedPerson) {
+          console.log(`Discovered NEW person via mention: ${name}`);
+          mentionedPerson = await db.createPerson(name);
+          anyNew = true;
+        }
+        console.log(`Saving relationship: ${currentPerson.name} -> ${name} (${relationship})`);
+        await db.saveRelationship(currentPerson.id, currentPerson.name, name, relationship, category, said);
+        anyNew = true;
+      }
+
+      if (anyNew) {
+        const people = await db.getAllPeople();
+        populatePersonSelect(people);
+        recognition.updateKnownPeople(people);
+
+        const networkTab = document.querySelector('.nav-tab[data-view="network"]');
+        if (networkTab && networkTab.classList.contains('active')) {
+          console.log(`Refreshing network graph with new data (Active: ${currentPerson?.name})...`);
+          const relationships = await db.getAllRelationships();
+          if (graph) graph.setData(people, relationships, currentPerson?.name);
+        }
+      }
+    });
+  }
+
   try {
     const context = await rag.retrieve(said);
     const options = await fetchOptions(said, modelInput.value.trim() || 'llama3.2', context);
@@ -401,14 +452,8 @@ async function handlePick(index, label, text) {
 
   // Persist memory and extract relationships — both fire-and-forget
   if (currentPerson) {
+    // 1. Persist memory for RAG
     rag.addAndPersist(entry, db, currentPerson.id);
-
-    const model = modelInput.value.trim() || 'llama3.2';
-    extractRelationships(said, model, currentPerson.name).then(async found => {
-      for (const { name, relationship, category } of found) {
-        await db.saveRelationship(currentPerson.id, currentPerson.name, name, relationship, category, said);
-      }
-    });
   }
 
   // Affection analysis via camera
