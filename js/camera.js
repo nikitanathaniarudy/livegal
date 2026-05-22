@@ -8,10 +8,13 @@ export class Camera {
     this.videoEl = null;
   }
 
-  async start(videoEl) {
+  async start(videoEl, deviceId = null) {
     this.videoEl = videoEl;
+    const videoConstraints = deviceId
+      ? { deviceId: { exact: deviceId }, width: { ideal: 320 }, height: { ideal: 240 } }
+      : { width: { ideal: 320 }, height: { ideal: 240 } };
     this.stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 320 }, height: { ideal: 240 } },
+      video: videoConstraints,
       audio: false,
     });
     videoEl.srcObject = this.stream;

@@ -106,27 +106,30 @@ function validate(item, said = '') {
  */
 export async function extractRelationships(said, model, speakerName) {
   const prompt =
-`Extract ONLY real named people from this text (excluding ${speakerName}).
+`Extract ONLY real people from ${speakerName}'s actual personal life (excluding ${speakerName} themselves).
 
 Text: "${said.replace(/"/g, "'")}"
 
 STRICT RULES:
-- A person MUST have an actual first name or full name used in the text.
-- Do NOT extract: pronouns (her, him, they), adverbs (someday, later), common words, or anything that is not a person's real name.
-- If no named person is mentioned, return exactly: []
+- ONLY extract someone if ${speakerName} has a real-world personal connection to them (friend, family, colleague, romantic partner, etc.).
+- Do NOT extract: fictional characters, TV/movie/game/book characters, celebrities, public figures, historical figures, politicians, athletes, or anyone famous.
+- Do NOT extract: pronouns, generic words, or names with no stated relationship to ${speakerName}.
+- If the person is being discussed as a topic (e.g. "what do you think of X", "X is a character in...") rather than someone ${speakerName} personally knows, do NOT extract them.
+- If no qualifying person is mentioned, return exactly: []
 - Return ONLY raw JSON array, no explanation.
 
 Fields per person:
 - "name": their proper name (Title Case, must appear verbatim in the text)
-- "relationship": their connection to ${speakerName} (e.g. "friend", "sister"). null if unclear.
-- "traits": adjectives describing them. [] if none.
+- "relationship": their real-world connection to ${speakerName} (e.g. "friend", "sister", "boss"). null if genuinely unclear.
+- "traits": adjectives describing them from what was said. [] if none.
 
 Examples:
 "I'm gonna catch up with my friend Sandra" → [{"name":"Sandra","relationship":"friend","traits":[]}]
-"I will introduce you to her someday" → []
 "My boss Tom is really strict" → [{"name":"Tom","relationship":"boss","traits":["strict"]}]
+"what do you think of Skyler White" → []
+"Breaking Bad's Walter White is interesting" → []
 "Let's go see Alice" → [{"name":"Alice","relationship":null,"traits":[]}]
-"I might see someone later" → []
+"I will introduce you to her someday" → []
 
 JSON ONLY:`;
 

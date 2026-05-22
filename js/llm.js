@@ -11,8 +11,8 @@ import { OLLAMA_URL, RESPONSE_TYPES } from './config.js';
  * @param {string} model
  * @param {Array}  context - relevant past exchanges from RAG (may be empty)
  */
-export async function fetchOptions(said, model, context = [], relationships = []) {
-  const prompt = buildPrompt(said, context, relationships);
+export async function fetchOptions(said, model, context = [], relationships = [], playerName = '') {
+  const prompt = buildPrompt(said, context, relationships, playerName);
 
   const res = await fetch(OLLAMA_URL, {
     method: 'POST',
@@ -35,7 +35,7 @@ export async function fetchOptions(said, model, context = [], relationships = []
   return options;
 }
 
-function buildPrompt(said, context, relationships = []) {
+function buildPrompt(said, context, relationships = [], playerName = '') {
   const labels = RESPONSE_TYPES.map(t => t.label).join(', ');
 
   const contextBlock = context.length
@@ -66,7 +66,11 @@ function buildPrompt(said, context, relationships = []) {
       }\nOnly reference these people if the current message directly mentions them or if their relationship is clearly relevant. Do NOT fabricate events, history, or drama involving these names.\n`
     : '';
 
-  return `You are generating response options for a real-life visual novel / galgame simulator.${contextBlock}${relationshipBlock}
+  const identity = playerName
+    ? `You are ${playerName}, the player character in a real-life visual novel / galgame simulator.`
+    : `You are the player character in a real-life visual novel / galgame simulator.`;
+
+  return `${identity}${contextBlock}${relationshipBlock}
 Someone just said to you: "${said.replace(/"/g, "'")}"
 
 Generate exactly 4 short response options (1-2 sentences each).

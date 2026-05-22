@@ -24,11 +24,11 @@ function normalizeRelLabel(rel) {
 }
 
 const CAT_COLOR = {
-  friend:   '#6eb8c8',
-  family:   '#9b7fd4',
-  romantic: '#c87d6e',
-  work:     '#7ec89b',
-  other:    '#9a9080',
+  friend:   '#22d3ee',
+  family:   '#e879f9',
+  romantic: '#fb923c',
+  work:     '#4ade80',
+  other:    '#9d80c8',
 };
 
 export class RelationshipGraph {
@@ -219,32 +219,54 @@ export class RelationshipGraph {
       if (!a || !b) continue;
       const color = CAT_COLOR[e.category] || CAT_COLOR.other;
 
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const ux = dx / dist, uy = dy / dist;
+
+      // Start/end at node circumference so line doesn't go through the circles
+      const sx = a.x + ux * a.r, sy = a.y + uy * a.r;
+      const ex = b.x - ux * (b.r + 8), ey = b.y - uy * (b.r + 8);
+
+      // Edge line
       ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(ex, ey);
       ctx.strokeStyle = color;
-      ctx.lineWidth   = 0.8; // Thinner lines
-      ctx.globalAlpha = 0.25; // More subtle edges
+      ctx.lineWidth   = 1.5;
+      ctx.globalAlpha = 0.6;
       ctx.stroke();
       ctx.globalAlpha = 1;
 
-      // Label at midpoint (only if not too crowded or on hover? let's keep it subtle)
-      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      // Arrowhead
+      const arrowLen = 8, arrowWid = 4;
+      const ax1 = ex - arrowLen * ux + arrowWid * uy;
+      const ay1 = ey - arrowLen * uy - arrowWid * ux;
+      const ax2 = ex - arrowLen * ux - arrowWid * uy;
+      const ay2 = ey - arrowLen * uy + arrowWid * ux;
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ax1, ay1);
+      ctx.lineTo(ax2, ay2);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.7;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Label at midpoint
+      const mx = (sx + ex) / 2, my = (sy + ey) / 2;
       const labelText = e.labels.map(normalizeRelLabel).join(', ');
-      ctx.font = '8px DM Mono, monospace';
+      ctx.font = '9px DM Mono, monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const tw = ctx.measureText(labelText).width;
 
-      ctx.fillStyle = '#0d0b14';
-      ctx.globalAlpha = 0.4; // More transparent label background
-      ctx.fillRect(mx - tw / 2 - 2, my - 6, tw + 4, 12);
+      ctx.fillStyle = 'rgba(5,6,15,0.75)';
       ctx.globalAlpha = 1;
+      ctx.fillRect(mx - tw / 2 - 3, my - 7, tw + 6, 14);
 
       ctx.fillStyle = color;
-      ctx.globalAlpha = 0.6;
       ctx.fillText(labelText, mx, my);
-      ctx.globalAlpha = 1;
     }
 
     // Nodes

@@ -1,6 +1,20 @@
 import { RESPONSE_TYPES }         from './config.js';
 import { computeOpponentProfile } from './opponent.js';
 
+const CLOSENESS_TIERS = [
+  { max: 15,  label: 'Stranger',     color: '#4a4560' },
+  { max: 30,  label: 'Acquaintance', color: '#6eb8c8' },
+  { max: 50,  label: 'Familiar',     color: '#7ec89b' },
+  { max: 70,  label: 'Friend',       color: '#9b7fd4' },
+  { max: 85,  label: 'Close',        color: '#c87d6e' },
+  { max: 100, label: 'Confidant',    color: '#c8a96e' },
+];
+
+function closenessInfo(val = 0) {
+  const tier = CLOSENESS_TIERS.find(t => val <= t.max) || CLOSENESS_TIERS.at(-1);
+  return { ...tier, pct: Math.round(val) };
+}
+
 // ── Status dot ───────────────────────────────────────────────────────
 
 export function setStatus(state) {
@@ -204,7 +218,7 @@ export function hideCameraOverlay() {
 }
 
 export function setCameraAnalyzing(active) {
-  document.getElementById('camera-preview').classList.toggle('analyzing', active);
+  document.getElementById('camera-preview')?.classList.toggle('analyzing', active);
 }
 
 // ── Person selector ──────────────────────────────────────────────────
@@ -264,14 +278,19 @@ export function renderDirectory(people) {
 
   grid.innerHTML = sorted.map(p => {
     const aff = p.totalAffection;
-    const affCls = aff > 0 ? 'pos' : aff < 0 ? 'neg' : 'neu';
+    const affCls  = aff > 0 ? 'pos' : aff < 0 ? 'neg' : 'neu';
     const affSign = aff > 0 ? '+' : '';
     const lastSeen = formatDate(p.lastSeen);
+    const cl = closenessInfo(p.closeness || 0);
 
     return `
       <div class="person-card affection-${affCls}" data-person-id="${p.id}">
         <button class="person-card-delete" data-person-id="${p.id}" title="Delete person">×</button>
         <div class="person-card-name">${p.name}</div>
+        <div class="closeness-bar-wrap">
+          <div class="closeness-bar-fill" style="width:${cl.pct}%;background:${cl.color}"></div>
+        </div>
+        <div class="closeness-tier" style="color:${cl.color}">${cl.label}</div>
         <div class="person-card-meta">
           <div class="person-meta-item">
             <span>affection</span>
@@ -403,9 +422,21 @@ export function renderPersonDetail(person, conversations, observations = []) {
 
   const profile    = computeOpponentProfile(observations);
   const profileHTML = opponentProfileCard(person.name, profile, observations.length);
+  const cl = closenessInfo(person.closeness || 0);
+  const closenessHTML = `
+    <div class="closeness-detail-card">
+      <div class="closeness-detail-label">closeness</div>
+      <div class="closeness-detail-bar-wrap">
+        <div class="closeness-detail-bar-fill" style="width:${cl.pct}%;background:${cl.color}"></div>
+      </div>
+      <div class="closeness-detail-foot">
+        <span class="closeness-detail-tier" style="color:${cl.color}">${cl.label}</span>
+        <span class="closeness-detail-pct">${cl.pct} / 100</span>
+      </div>
+    </div>`;
 
   if (!conversations.length) {
-    detail.innerHTML = profileHTML + `<div class="directory-empty" style="margin-top:16px">No saved conversations yet.</div>`;
+    detail.innerHTML = closenessHTML + profileHTML + `<div class="directory-empty" style="margin-top:16px">No saved conversations yet.</div>`;
     return;
   }
 
@@ -443,7 +474,7 @@ export function renderPersonDetail(person, conversations, observations = []) {
       </div>`;
   }).join('');
 
-  detail.innerHTML = profileHTML + convsHTML;
+  detail.innerHTML = closenessHTML + profileHTML + convsHTML;
 
   detail.querySelectorAll('.conv-card-header').forEach(hdr => {
     hdr.addEventListener('click', (e) => {

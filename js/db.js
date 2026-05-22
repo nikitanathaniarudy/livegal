@@ -86,6 +86,7 @@ export class GalGameDB {
       lastSeen:          now,
       totalAffection:    0,
       conversationCount: 0,
+      closeness:         0,
     });
   }
 

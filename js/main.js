@@ -30,6 +30,16 @@ const recognition = new RecognitionTracker();
 const rag         = new ConversationRAG();
 let   graph       = null;   // lazy-init when Network tab first opens
 
+// ── Player identity ───────────────────────────────────────────────────
+
+let playerName = localStorage.getItem('playerName') || '';
+
+function setPlayerName(name) {
+  playerName = name.trim();
+  localStorage.setItem('playerName', playerName);
+  document.getElementById('player-name-display').textContent = playerName || '—';
+}
+
 // ── Session state ─────────────────────────────────────────────────────
 
 let history        = [];
@@ -54,6 +64,7 @@ const facePrompt      = document.getElementById('face-prompt');
 const facePromptInput = document.getElementById('face-prompt-input');
 const facePromptOk    = document.getElementById('face-prompt-ok');
 const facePromptSkip  = document.getElementById('face-prompt-skip');
+const cameraSelect    = document.getElementById('camera-select');
 
 // ── Init ──────────────────────────────────────────────────────────────
 
@@ -63,9 +74,36 @@ async function init() {
   populatePersonSelect(people);
   recognition.updateKnownPeople(people);
   updateAffectionMeter(0);
+
+  // Player identity setup
+  document.getElementById('player-name-display').textContent = playerName || '—';
+  if (!playerName) {
+    document.getElementById('player-setup-modal').classList.remove('hidden');
+    document.getElementById('player-setup-input').focus();
+  }
 }
 
 init();
+
+// ── Player name setup events ──────────────────────────────────────────
+
+document.getElementById('player-setup-ok').addEventListener('click', () => {
+  const val = document.getElementById('player-setup-input').value.trim();
+  if (!val) return;
+  setPlayerName(val);
+  document.getElementById('player-setup-modal').classList.add('hidden');
+});
+
+document.getElementById('player-setup-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('player-setup-ok').click();
+});
+
+document.getElementById('player-name-display').addEventListener('click', () => {
+  const input = document.getElementById('player-setup-input');
+  input.value = playerName;
+  document.getElementById('player-setup-modal').classList.remove('hidden');
+  input.focus();
+});
 
 // ── Recognition Loop ──────────────────────────────────────────────────
 
@@ -344,11 +382,14 @@ endSessionBtn.addEventListener('click', async () => {
   const sessionAffection  = affection.total;
 
   if (history.length > 0) {
+    const closenessGain = Math.ceil(history.length * 1.5 + Math.max(0, affection.total * 0.5));
+    const newCloseness  = Math.min(100, (currentPerson.closeness || 0) + closenessGain);
     await db.saveConversation(currentPerson.id, history, affection.total, sessionStart);
     await db.updatePerson(currentPerson.id, {
       lastSeen:          new Date().toISOString(),
       totalAffection:    currentPerson.totalAffection + affection.total,
       conversationCount: currentPerson.conversationCount + 1,
+      closeness:         newCloseness,
     });
   }
 
@@ -376,22 +417,74 @@ endSessionBtn.addEventListener('click', async () => {
 
 // ── Camera ────────────────────────────────────────────────────────────
 
+const cameraSelectRow = document.getElementById('camera-select-row');
+const cameraRefreshBtn = document.getElementById('camera-refresh-btn');
+let cameraPermissionGranted = false;
+
+async function enumerateCameras() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const cameras = devices.filter(d => d.kind === 'videoinput');
+  const prev = cameraSelect.value;
+  cameraSelect.innerHTML = cameras.map((d, i) =>
+    `<option value="${d.deviceId}">${d.label || `Camera ${i + 1}`}</option>`
+  ).join('');
+  if (prev && [...cameraSelect.options].some(o => o.value === prev)) {
+    cameraSelect.value = prev;
+  }
+  cameraSelectRow.classList.toggle('hidden', cameras.length === 0);
+}
+
 cameraStartBtn.addEventListener('click', async () => {
   cameraStartBtn.disabled = true;
   setCameraOverlayHint('Requesting camera access…');
+
+  // Get permission first so device labels are readable
+  if (!cameraPermissionGranted) {
+    try {
+      const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      tempStream.getTracks().forEach(t => t.stop());
+      cameraPermissionGranted = true;
+    } catch (err) {
+      cameraStartBtn.disabled = false;
+      setCameraOverlayHint(
+        err.name === 'NotAllowedError'
+          ? 'Camera access denied — allow it in browser settings.'
+          : 'Could not start camera: ' + err.message
+      );
+      return;
+    }
+    await enumerateCameras();
+  }
+
+  // If multiple cameras exist, show selector and wait for a second click
+  const cameraCount = cameraSelect.options.length;
+  if (cameraCount > 1 && cameraSelectRow.classList.contains('hidden')) {
+    cameraSelectRow.classList.remove('hidden');
+    cameraStartBtn.disabled = false;
+    cameraStartBtn.textContent = 'Start with selected camera';
+    setCameraOverlayHint('Select your camera above, then click Start. Use ↺ if iPhone Camera is missing.');
+    return;
+  }
+
+  // Single camera or user already chose — start immediately
+  setCameraOverlayHint('Starting camera…');
   try {
-    await camera.start(cameraFeed);
+    const deviceId = cameraSelect.value || null;
+    await camera.start(cameraFeed, deviceId);
     hideCameraOverlay();
     await loadModels();
     recognitionLoop();
   } catch (err) {
     cameraStartBtn.disabled = false;
-    setCameraOverlayHint(
-      err.name === 'NotAllowedError'
-        ? 'Camera access denied — allow it in browser settings.'
-        : 'Could not start camera: ' + err.message
-    );
+    setCameraOverlayHint('Could not start camera: ' + err.message);
   }
+});
+
+cameraRefreshBtn.addEventListener('click', async () => {
+  cameraRefreshBtn.textContent = '…';
+  await enumerateCameras();
+  cameraRefreshBtn.textContent = '↺';
+  setCameraOverlayHint('List refreshed — select your camera and click Start.');
 });
 
 async function loadModels() {
@@ -452,9 +545,13 @@ async function generate() {
           continue;
         }
 
+        // Hard gate: skip anyone with no stated relationship — prevents fictional
+        // characters, celebrities, and topic-only mentions from entering the graph.
+        if (!relationship) continue;
+
         let mentionedPerson = await db.getPersonByName(name);
         if (!mentionedPerson) {
-          console.log(`Discovered NEW person via mention: ${name}`);
+          console.log(`Discovered NEW person via mention: ${name} (${relationship})`);
           mentionedPerson = await db.createPerson(name);
           anyNew = true;
         }
@@ -466,12 +563,10 @@ async function generate() {
           anyNew = true;
         }
 
-        // 2. Update relationship (roles)
-        if (relationship) {
-          console.log(`Saving relationship: ${currentPerson.name} -> ${name} (${relationship})`);
-          await db.saveRelationship(currentPerson.id, currentPerson.name, name, relationship, category, said);
-          anyNew = true;
-        }
+        // 2. Save relationship edge
+        console.log(`Saving relationship: ${currentPerson.name} -> ${name} (${relationship})`);
+        await db.saveRelationship(currentPerson.id, currentPerson.name, name, relationship, category, said);
+        anyNew = true;
       }
 
       if (anyNew) {
@@ -494,7 +589,7 @@ async function generate() {
       rag.retrieve(said),
       currentPerson ? db.getRelationshipsForPerson(currentPerson.id) : Promise.resolve([]),
     ]);
-    const options = await fetchOptions(said, modelInput.value.trim() || DEFAULT_MODEL, context, relationships);
+    const options = await fetchOptions(said, modelInput.value.trim() || DEFAULT_MODEL, context, relationships, playerName);
     pendingOptions = options;
     renderChoices(options, handlePick);
     setStatus('');

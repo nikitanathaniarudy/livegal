@@ -4,19 +4,40 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Live Gal Game ✦</title>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;600&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cinzel:wght@400;600&family=Lora:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
+  <!-- ── Starfield layers ─────────────────────────────────── -->
+  <div class="stars-1"></div>
+  <div class="stars-2"></div>
+  <div class="stars-3"></div>
+
+  <!-- ── Header ──────────────────────────────────────────── -->
   <header>
-    <div class="logo">Live Gal Game <span>— prototype</span></div>
+    <div class="logo">Live Gal Game <span>✦</span></div>
     <nav class="nav-tabs">
       <button class="nav-tab active" data-view="conversation">Conversation</button>
       <button class="nav-tab"        data-view="directory">Directory</button>
       <button class="nav-tab"        data-view="analytics">Analytics</button>
       <button class="nav-tab"        data-view="network">Network</button>
     </nav>
+    <div class="player-pill" title="Click to change your name">
+      <span class="player-pill-label">you:</span>
+      <span id="player-name-display">—</span>
+    </div>
+    <!-- Session bar lives in header so it never overlaps the camera -->
+    <div class="vn-session-bar hidden" id="session-bar">
+      <span class="affection-label">♡</span>
+      <span class="affection-total" id="affection-total">0</span>
+      <!-- bar + spark kept in DOM for JS but hidden -->
+      <div style="display:none">
+        <div class="affection-bar-fill" id="affection-bar-fill"></div>
+        <svg id="affection-spark" class="affection-spark" preserveAspectRatio="none"></svg>
+      </div>
+      <button class="end-session-btn" id="end-session-btn">End session ✓</button>
+    </div>
     <div class="model-pill">
       <div class="status-dot" id="status-dot"></div>
       <span>model:</span>
@@ -24,14 +45,53 @@
     </div>
   </header>
 
+  <!-- ── Player name setup modal ──────────────────────────── -->
+  <div id="player-setup-modal" class="player-setup-modal hidden">
+    <div class="player-setup-panel">
+      <div class="player-setup-eyebrow">welcome</div>
+      <div class="player-setup-title">what's your name?</div>
+      <div class="player-setup-sub">The AI will respond to you as this person.</div>
+      <input type="text" id="player-setup-input" placeholder="your name…" spellcheck="false" maxlength="32"/>
+      <button id="player-setup-ok">Start playing</button>
+    </div>
+  </div>
+
   <!-- ═══════════════ CONVERSATION VIEW ═══════════════ -->
-  <div id="view-conversation">
+  <div id="view-conversation" class="vn-view">
+
+    <!-- STAGE: fullscreen camera background -->
+    <div class="vn-stage">
+      <video id="camera-feed" autoplay playsinline muted></video>
+      <div class="vn-stage-vignette"></div>
+
+      <!-- Camera enable overlay -->
+      <div class="camera-overlay" id="camera-overlay">
+        <div class="camera-overlay-inner">
+          <div class="camera-overlay-icon">◈</div>
+          <div class="camera-select-row hidden" id="camera-select-row">
+            <select id="camera-select" class="camera-select"></select>
+            <button class="camera-refresh-btn" id="camera-refresh-btn" title="Refresh camera list">↺</button>
+          </div>
+          <button class="camera-start-btn" id="camera-start-btn">Enable camera</button>
+          <div class="camera-overlay-hint" id="camera-overlay-hint"></div>
+        </div>
+      </div>
+
+      <!-- Score popup floats in the middle of the stage -->
+      <div class="score-popup" id="score-popup"></div>
+
+      <div class="face-prompt hidden" id="face-prompt">
+        <span class="face-prompt-label">Who is this?</span>
+        <input type="text" id="face-prompt-input" placeholder="their name…" spellcheck="false"/>
+        <button id="face-prompt-ok">OK</button>
+        <button id="face-prompt-skip">Skip</button>
+      </div>
+    </div>
 
     <!-- Person selector (shown when no active session) -->
     <div class="person-selector" id="person-selector">
       <div class="person-selector-inner">
         <div class="person-selector-label">— who are you talking to? —</div>
-
         <div class="person-selector-row">
           <select class="person-select" id="person-select">
             <option value="">Select person…</option>
@@ -45,113 +105,64 @@
             autocomplete="off"
             style="display:none"
           />
-          <button class="start-session-btn" id="start-session-btn">Start session →</button>
+          <button class="start-session-btn" id="start-session-btn">Start →</button>
         </div>
       </div>
     </div>
 
-    <!-- Active session bar (shown during a session) -->
-    <div class="session-bar hidden" id="session-bar">
-      <div class="session-person">
-        <span class="session-person-label">talking to</span>
-        <span class="session-person-name" id="session-person-name">—</span>
-      </div>
-      <button class="end-session-btn" id="end-session-btn">End session ✓</button>
-    </div>
-
-    <main class="scene">
-
-      <div class="scene-top">
-        <!-- Left: camera + affection -->
-        <div class="camera-panel">
-          <div class="scene-label">— person —</div>
-          <div class="camera-preview" id="camera-preview">
-            <video id="camera-feed" autoplay playsinline muted></video>
-            <div class="camera-overlay" id="camera-overlay">
-              <button class="camera-start-btn" id="camera-start-btn">Enable camera</button>
-              <div class="camera-overlay-hint" id="camera-overlay-hint"></div>
-            </div>
-            <div class="score-popup" id="score-popup"></div>
-            <div class="face-prompt hidden" id="face-prompt">
-              <span class="face-prompt-label">Who is this?</span>
-              <input type="text" id="face-prompt-input" placeholder="their name…" spellcheck="false"/>
-              <button id="face-prompt-ok">OK</button>
-              <button id="face-prompt-skip">Skip</button>
-            </div>
-          </div>
-          <div class="affection-meter">
-            <span class="affection-label">affection</span>
-            <div class="affection-bar-col">
-              <div class="affection-bar-wrap">
-                <div class="affection-bar-fill" id="affection-bar-fill"></div>
-                <div class="affection-center-line"></div>
-              </div>
-              <svg id="affection-spark" class="affection-spark hidden" preserveAspectRatio="none"></svg>
-            </div>
-            <span class="affection-total" id="affection-total">0</span>
-          </div>
-        </div>
-
-        <!-- Right: dialogue -->
-        <div class="dialogue-panel">
-          <div class="scene-label">— they said —</div>
-          <div class="dialogue-box">
-            <div class="dialogue-speaker">Person</div>
-            <div class="dialogue-text empty" id="dialogue-display">
-              Type what they said below and press Generate ↓
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="input-row">
-        <button class="mic-btn" id="mic-btn" title="Click to speak">🎙</button>
-        <input
-          class="speech-input"
-          id="speech-input"
-          type="text"
-          placeholder="Type or press 🎙 to speak…"
-          autocomplete="off"
-        />
-        <button class="generate-btn" id="generate-btn">Generate →</button>
-      </div>
-      <div class="transcript-hint" id="transcript-hint"></div>
+    <!-- Bottom UI: choices + VN dialogue box -->
+    <div class="vn-bottom">
 
       <div id="error-container"></div>
+      <div class="transcript-hint" id="transcript-hint"></div>
 
-      <div class="choices-label">— your response —</div>
+      <!-- Response choices -->
       <div class="choices-grid" id="choices-grid">
         <div class="empty-choices">Options will appear here after you generate</div>
       </div>
 
-    </main>
+      <!-- VN Dialogue Box -->
+      <div class="vn-dialogue-box">
+        <div class="vn-nameplate">
+          <span id="session-person-name">—</span>
+        </div>
 
-    <section class="history-section">
-      <div class="history-label">
-        <span>— this session —</span>
-        <button class="clear-btn" id="clear-btn">clear</button>
+        <div class="vn-dialogue-text empty" id="dialogue-display">
+          Type what they said below and press Generate ↓
+        </div>
+
+        <div class="vn-input-row">
+          <button class="mic-btn" id="mic-btn" title="Click to speak">🎙</button>
+          <input
+            class="speech-input"
+            id="speech-input"
+            type="text"
+            placeholder="Type or speak what they said…"
+            autocomplete="off"
+          />
+          <button class="generate-btn" id="generate-btn">Generate →</button>
+        </div>
       </div>
+    </div>
+
+    <!-- Session history kept in DOM for JS but hidden; review shown in debrief -->
+    <div style="display:none">
       <div class="history-list" id="history-list"></div>
-    </section>
+      <button id="clear-btn"></button>
+    </div>
 
   </div>
 
   <!-- ═══════════════ DIRECTORY VIEW ═══════════════ -->
   <div id="view-directory" class="view-hidden">
-
     <div class="directory-header">
       <div class="directory-title-row">
         <span class="directory-title" id="directory-title">— people —</span>
         <button class="dir-back-btn hidden" id="dir-back-btn">← back</button>
       </div>
     </div>
-
-    <!-- People grid -->
     <div class="directory-grid" id="directory-grid"></div>
-
-    <!-- Person detail (conversations list) -->
     <div class="person-detail hidden" id="person-detail"></div>
-
   </div>
 
   <!-- ═══════════════ NETWORK VIEW ═══════════════ -->
@@ -159,10 +170,10 @@
     <div class="network-header">
       <span class="network-title">— relationship network —</span>
       <span class="network-legend">
-        <span class="legend-item" style="color:#6eb8c8">— friend</span>
-        <span class="legend-item" style="color:#9b7fd4">— family</span>
-        <span class="legend-item" style="color:#c87d6e">— romantic</span>
-        <span class="legend-item" style="color:#7ec89b">— work</span>
+        <span class="legend-item" style="color:#22d3ee">— friend</span>
+        <span class="legend-item" style="color:#e879f9">— family</span>
+        <span class="legend-item" style="color:#fb923c">— romantic</span>
+        <span class="legend-item" style="color:#4ade80">— work</span>
       </span>
     </div>
     <div class="graph-wrap" id="graph-wrap">
@@ -177,7 +188,6 @@
   <!-- ═══════════════ ANALYTICS VIEW ═══════════════ -->
   <div id="view-analytics" class="view-hidden">
     <div class="analytics-wrap" id="analytics-wrap">
-      <!-- Populated by renderAnalytics() -->
       <div class="analytics-empty">
         No data yet. Complete a session to see your personality profile.
       </div>
