@@ -5,7 +5,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Live Gal Game ✦</title>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cinzel:wght@400;600&family=Lora:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=3">
+  <script>console.log('HTML Version: [v3 - registration-root]');</script>
+  <style>
+    /* Critical fallback styles for the registration modal */
+    .face-reg-backdrop {
+      position: fixed !important;
+      inset: 0 !important;
+      background: rgba(0, 0, 0, 0.9) !important;
+      z-index: 9998 !important;
+    }
+    .face-registration-modal {
+      position: fixed !important;
+      top: 50% !important;
+      left: 50% !important;
+      transform: translate(-50%, -50%) !important;
+      z-index: 9999 !important;
+      background: #1a1626 !important;
+      border: 2px solid #f8c840 !important;
+      padding: 30px !important;
+      color: white !important;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      width: 350px;
+    }
+  </style>
 </head>
 <body>
 
@@ -80,13 +105,6 @@
 
       <!-- Score popup floats in the middle of the stage -->
       <div class="score-popup" id="score-popup"></div>
-
-      <div class="face-prompt hidden" id="face-prompt">
-        <span class="face-prompt-label">Who is this?</span>
-        <input type="text" id="face-prompt-input" placeholder="their name…" spellcheck="false"/>
-        <button id="face-prompt-ok">OK</button>
-        <button id="face-prompt-skip">Skip</button>
-      </div>
     </div>
 
     <!-- Person selector (shown when no active session and no camera) -->
@@ -208,7 +226,18 @@
     </div>
   </div>
 
+  <!-- Global Prompt for face registration -->
+  <div class="face-reg-backdrop hidden" id="face-reg-backdrop" style="display: none"></div>
+  <div class="face-registration-modal hidden" id="face-reg-modal" style="display: none">
+    <span class="face-reg-label">I don't recognize you. Who is this?</span>
+    <input type="text" id="face-reg-input" placeholder="Enter name…" spellcheck="false"/>
+    <div class="face-reg-btns">
+      <button id="face-reg-ok">Register Face</button>
+      <button id="face-reg-skip">Ignore</button>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
-  <script type="module" src="js/main.js"></script>
+  <script type="module" src="js/main.js?v=3"></script>
 </body>
 </html>

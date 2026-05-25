@@ -991,49 +991,69 @@ header {
   100% { opacity: 0;   transform: translateX(-50%) translateY(-70px)  scale(0.9); }
 }
 
-/* ── Face prompt (inline "who is this?" banner) ─────────── */
+/* ── Face registration modal ────────────────────────── */
 
-.face-prompt {
-  position: absolute;
-  bottom: 0;
-  left: 0; right: 0;
-  background: rgba(13, 11, 20, 0.88);
+.face-reg-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 3, 10, 0.85);
   backdrop-filter: blur(4px);
-  border-top: 1px solid rgba(200, 169, 110, 0.3);
-  padding: 8px 10px;
+  z-index: 9998;
+}
+
+.face-registration-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  max-width: 400px;
+  background: rgba(20, 15, 35, 0.98);
+  backdrop-filter: blur(20px);
+  border: 2px solid var(--accent);
+  border-radius: 12px;
+  padding: 32px;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  z-index: 10;
+  flex-direction: column;
+  gap: 20px;
+  z-index: 9999;
+  box-shadow: 0 20px 80px rgba(0,0,0,0.9), 0 0 30px rgba(248,200,64,0.3);
 }
-.face-prompt.hidden { display: none; }
-.face-prompt-label {
-  font-size: 10px;
-  color: #f8c840;
-  white-space: nowrap;
-  font-family: 'DM Mono', monospace;
+.face-registration-modal.hidden, .face-reg-backdrop.hidden { display: none !important; }
+.face-reg-label {
+  font-size: 14px;
+  color: var(--accent);
+  font-family: 'Lora', serif;
+  text-align: center;
 }
-.face-prompt input {
-  flex: 1;
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(248,200,64,0.3);
+.face-registration-modal input {
+  background: var(--paper3);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  color: #e8e0d4;
+  color: var(--ink);
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
-  padding: 3px 7px;
+  font-size: 14px;
+  padding: 10px;
   outline: none;
+  text-align: center;
 }
-.face-prompt button {
+.face-reg-btns {
+  display: flex;
+  gap: 8px;
+}
+.face-reg-btns button {
+  flex: 1;
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   border-radius: 4px;
   border: none;
-  padding: 3px 9px;
+  padding: 10px;
   cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
-#face-prompt-ok   { background: #f8c840; color: #0d0b14; }
-#face-prompt-skip { background: rgba(255,255,255,0.07); color: #8a8070; }
+#face-reg-ok   { background: var(--accent); color: var(--paper); font-weight: 600; }
+#face-reg-skip { background: rgba(255,255,255,0.1); color: var(--ink-dim); }
 
 /* ── Affection meter ────────────────────────────────────── */
 

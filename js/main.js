@@ -1,4 +1,5 @@
 import { RESPONSE_TYPES, DEFAULT_MODEL } from './config.js';
+console.log('main.js loaded [v3 - registration-root]');
 import { fetchOptions }    from './llm.js';
 import { SpeechInput }     from './speech.js';
 import { Camera }          from './camera.js';
@@ -61,10 +62,6 @@ const personSelect    = document.getElementById('person-select');
 const personNameInput = document.getElementById('person-name-input');
 const startSessionBtn = document.getElementById('start-session-btn');
 const endSessionBtn   = document.getElementById('end-session-btn');
-const facePrompt      = document.getElementById('face-prompt');
-const facePromptInput = document.getElementById('face-prompt-input');
-const facePromptOk    = document.getElementById('face-prompt-ok');
-const facePromptSkip  = document.getElementById('face-prompt-skip');
 const cameraSelect    = document.getElementById('camera-select');
 
 // ── Init ──────────────────────────────────────────────────────────────
@@ -152,25 +149,30 @@ async function recognitionLoop() {
 
           if (finalId === 'unknown') {
             console.log('Triggering name prompt for new face...');
-            const nameInput = await askFaceName();
-            if (nameInput) {
-              const name = toTitleCase(nameInput);
-              const existing = await db.getPersonByName(name);
-              let person;
-              if (existing) {
-                person = existing;
-                if (!person.faceDescriptor) {
-                  person = await db.updatePerson(person.id, { faceDescriptor: Array.from(finalDescriptor) });
+            try {
+              console.log('Type of initiateFaceRegistration:', typeof initiateFaceRegistration);
+              const nameInput = await initiateFaceRegistration();
+              if (nameInput) {
+                const name = toTitleCase(nameInput);
+                const existing = await db.getPersonByName(name);
+                let person;
+                if (existing) {
+                  person = existing;
+                  if (!person.faceDescriptor) {
+                    person = await db.updatePerson(person.id, { faceDescriptor: Array.from(finalDescriptor) });
+                  }
+                } else {
+                  person = await db.createPerson(name, Array.from(finalDescriptor));
                 }
-              } else {
-                person = await db.createPerson(name, Array.from(finalDescriptor));
+                const people = await db.getAllPeople();
+                populatePersonSelect(people);
+                recognition.updateKnownPeople(people);
+                
+                if (currentPerson) await endCurrentSession(false);
+                await startSession(person, false);
               }
-              const people = await db.getAllPeople();
-              populatePersonSelect(people);
-              recognition.updateKnownPeople(people);
-              
-              if (currentPerson) await endCurrentSession(false);
-              await startSession(person, false);
+            } catch (err) {
+              console.error('Error during face registration or session start:', err);
             }
           } else {
             // Known person (different from current) detected
@@ -193,27 +195,57 @@ async function recognitionLoop() {
   isRecognizing = false;
 }
 
-function askFaceName() {
+function initiateFaceRegistration() {
+  console.log('initiateFaceRegistration() called');
   return new Promise(resolve => {
-    facePromptInput.value = '';
-    facePrompt.classList.remove('hidden');
-    facePromptInput.focus();
+    const el = document.getElementById('face-reg-modal');
+    const backdrop = document.getElementById('face-reg-backdrop');
+    const input = document.getElementById('face-reg-input');
+    const okBtn = document.getElementById('face-reg-ok');
+    const skipBtn = document.getElementById('face-reg-skip');
+
+    if (!el || !input || !okBtn || !skipBtn) {
+      console.error('Registration modal elements missing from DOM!', { el, input, okBtn, skipBtn });
+      resolve(null);
+      return;
+    }
+
+    input.value = '';
+    el.classList.remove('hidden');
+    el.style.display = 'flex';
+    if (backdrop) {
+      backdrop.classList.remove('hidden');
+      backdrop.style.display = 'block';
+    }
+    input.focus();
+    
+    console.log('Registration modal should be visible now', { 
+      display: el.style.display, 
+      className: el.className,
+      zIndex: window.getComputedStyle(el).zIndex 
+    });
 
     const done = (name) => {
-      facePrompt.classList.add('hidden');
-      facePromptOk.removeEventListener('click', onOk);
-      facePromptSkip.removeEventListener('click', onSkip);
-      facePromptInput.removeEventListener('keydown', onKey);
+      console.log('Registration modal done, result:', name);
+      el.classList.add('hidden');
+      el.style.display = 'none';
+      if (backdrop) {
+        backdrop.classList.add('hidden');
+        backdrop.style.display = 'none';
+      }
+      okBtn.removeEventListener('click', onOk);
+      skipBtn.removeEventListener('click', onSkip);
+      input.removeEventListener('keydown', onKey);
       resolve(name || null);
     };
 
-    const onOk   = () => done(facePromptInput.value.trim());
+    const onOk   = () => done(input.value.trim());
     const onSkip = () => done(null);
-    const onKey  = (e) => { if (e.key === 'Enter') done(facePromptInput.value.trim()); };
+    const onKey  = (e) => { if (e.key === 'Enter') done(input.value.trim()); };
 
-    facePromptOk.addEventListener('click', onOk);
-    facePromptSkip.addEventListener('click', onSkip);
-    facePromptInput.addEventListener('keydown', onKey);
+    okBtn.addEventListener('click', onOk);
+    skipBtn.addEventListener('click', onSkip);
+    input.addEventListener('keydown', onKey);
   });
 }
 
