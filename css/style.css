@@ -891,6 +891,20 @@ header {
 }
 .camera-start-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.camera-manual-btn {
+  background: transparent;
+  border: none;
+  color: var(--ink-dim);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  margin-top: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+.camera-manual-btn:hover { opacity: 1; }
+
 .camera-select-row {
   display: flex;
   align-items: center;
@@ -2389,3 +2403,8 @@ header {
   transition: color 0.15s, border-color 0.15s;
 }
 .conv-review-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ── Global Utility ─────────────────────────────────────────── */
+
+.hidden { display: none !important; }
+

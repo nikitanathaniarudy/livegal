@@ -214,7 +214,9 @@ export function setCameraOverlayHint(text) {
 }
 
 export function hideCameraOverlay() {
-  document.getElementById('camera-overlay').classList.add('hidden');
+  const el = document.getElementById('camera-overlay');
+  el.classList.add('hidden');
+  el.style.display = 'none';
 }
 
 export function setCameraAnalyzing(active) {
@@ -245,15 +247,48 @@ export function populatePersonSelect(people) {
 // ── Session bar ──────────────────────────────────────────────────────
 
 export function showSessionBar(personName) {
-  document.getElementById('person-selector').style.display = 'none';
-  document.getElementById('session-bar').classList.remove('hidden');
+  const sel = document.getElementById('person-selector');
+  sel.classList.add('hidden');
+  sel.style.display = 'none';
+
+  const bar = document.getElementById('session-bar');
+  bar.classList.remove('hidden');
+  bar.style.display = '';
+
+  // Show the input row when in a session
+  const inputRow = document.querySelector('.vn-input-row');
+  if (inputRow) {
+    inputRow.classList.remove('hidden');
+    inputRow.style.display = 'flex';
+  }
+
   document.getElementById('session-person-name').textContent = personName;
 }
 
+export function resetToIdleState() {
+  const bar = document.getElementById('session-bar');
+  if (bar) {
+    bar.classList.add('hidden');
+    bar.style.display = 'none';
+  }
+
+  const inputRow = document.querySelector('.vn-input-row');
+  if (inputRow) {
+    inputRow.classList.add('hidden');
+    inputRow.style.display = 'none';
+  }
+
+  const namePlate = document.getElementById('session-person-name');
+  if (namePlate) namePlate.textContent = '—';
+}
+
 export function showPersonSelector() {
-  document.getElementById('person-selector').style.display = '';
-  document.getElementById('session-bar').classList.add('hidden');
-  document.getElementById('session-person-name').textContent = '—';
+  resetToIdleState();
+  const sel = document.getElementById('person-selector');
+  if (sel) {
+    sel.classList.remove('hidden');
+    sel.style.display = 'flex';
+  }
 }
 
 // ── Directory rendering ──────────────────────────────────────────────

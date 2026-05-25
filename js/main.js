@@ -9,7 +9,6 @@ import { computeAnalytics }    from './analytics.js';
 import { ConversationRAG }     from './rag.js';
 import { extractRelationships } from './extractor.js';
 import { extractOpponentCues }  from './opponent.js';
-import { showDebrief }          from './ui.js';
 import { RelationshipGraph }   from './graph.js';
 import {
   setStatus, setDialogue, resetDialogue,
@@ -17,8 +16,9 @@ import {
   showShimmer, showEmptyChoices, renderChoices, renderHistory,
   updateAffectionMeter, showScorePopup,
   setCameraOverlayHint, hideCameraOverlay, setCameraAnalyzing,
-  populatePersonSelect, showSessionBar, showPersonSelector,
+  populatePersonSelect, showSessionBar, showPersonSelector, resetToIdleState,
   renderDirectory, renderPersonDetail, renderAnalytics,
+  showDebrief,
 } from './ui.js';
 
 // ── Core objects ──────────────────────────────────────────────────────
@@ -56,6 +56,7 @@ const micBtn          = document.getElementById('mic-btn');
 const modelInput      = document.getElementById('model-input');
 const cameraFeed      = document.getElementById('camera-feed');
 const cameraStartBtn  = document.getElementById('camera-start-btn');
+const cameraManualBtn = document.getElementById('camera-manual-btn');
 const personSelect    = document.getElementById('person-select');
 const personNameInput = document.getElementById('person-name-input');
 const startSessionBtn = document.getElementById('start-session-btn');
@@ -74,6 +75,7 @@ async function init() {
   populatePersonSelect(people);
   recognition.updateKnownPeople(people);
   updateAffectionMeter(0);
+  resetToIdleState();
 
   // Player identity setup
   document.getElementById('player-name-display').textContent = playerName || '—';
@@ -107,12 +109,15 @@ document.getElementById('player-name-display').addEventListener('click', () => {
 
 // ── Recognition Loop ──────────────────────────────────────────────────
 
+let detectionStreak = { id: null, count: 0, descriptor: null };
+const STREAK_THRESHOLD = 2; // frames to confirm (faster)
+
 async function recognitionLoop() {
   if (isRecognizing) return;
   isRecognizing = true;
 
   while (camera.isRunning) {
-    if (currentPerson || !recognition.isLoaded) {
+    if (!recognition.isLoaded) {
       await new Promise(r => setTimeout(r, 1000));
       continue;
     }
@@ -122,35 +127,67 @@ async function recognitionLoop() {
     setCameraAnalyzing(false);
 
     if (descriptor) {
+      console.log('Face descriptor captured, attempting recognition...');
       const match = recognition.recognize(descriptor);
-      if (match) {
-        const person = await db.getPerson(match.id);
-        if (person) await startSession(person, true);
+      const matchedId = match ? match.id : 'unknown';
+
+      console.log(`Current streak: ${detectionStreak.id} (${detectionStreak.count}/${STREAK_THRESHOLD}) | Match: ${matchedId}`);
+
+      // If we are already talking to this person, keep streak at 0
+      if (currentPerson && currentPerson.id === matchedId) {
+        detectionStreak = { id: null, count: 0, descriptor: null };
       } else {
-        const nameInput = await askFaceName();
-        if (nameInput) {
-          const name = toTitleCase(nameInput);
-          const existing = await db.getPersonByName(name);
-          let person;
-          if (existing) {
-            person = existing;
-            if (!person.faceDescriptor) {
-              person = await db.updatePerson(person.id, { faceDescriptor: Array.from(descriptor) });
+        if (detectionStreak.id === matchedId) {
+          detectionStreak.count++;
+          detectionStreak.descriptor = descriptor; // Keep latest descriptor
+        } else {
+          detectionStreak = { id: matchedId, count: 1, descriptor };
+        }
+
+        if (detectionStreak.count >= STREAK_THRESHOLD) {
+          console.log(`Streak reached! Proceeding with identification for: ${matchedId}`);
+          const finalDescriptor = detectionStreak.descriptor;
+          const finalId = detectionStreak.id;
+          detectionStreak = { id: null, count: 0, descriptor: null };
+
+          if (finalId === 'unknown') {
+            console.log('Triggering name prompt for new face...');
+            const nameInput = await askFaceName();
+            if (nameInput) {
+              const name = toTitleCase(nameInput);
+              const existing = await db.getPersonByName(name);
+              let person;
+              if (existing) {
+                person = existing;
+                if (!person.faceDescriptor) {
+                  person = await db.updatePerson(person.id, { faceDescriptor: Array.from(finalDescriptor) });
+                }
+              } else {
+                person = await db.createPerson(name, Array.from(finalDescriptor));
+              }
+              const people = await db.getAllPeople();
+              populatePersonSelect(people);
+              recognition.updateKnownPeople(people);
+              
+              if (currentPerson) await endCurrentSession(false);
+              await startSession(person, false);
             }
           } else {
-            person = await db.createPerson(name, Array.from(descriptor));
+            // Known person (different from current) detected
+            const person = await db.getPerson(finalId);
+            if (person) {
+              if (currentPerson) await endCurrentSession(false);
+              await startSession(person, true);
+            }
           }
-          const people = await db.getAllPeople();
-          populatePersonSelect(people);
-          recognition.updateKnownPeople(people);
-          await startSession(person, false);
-        } else {
-          await new Promise(r => setTimeout(r, 5000));
         }
       }
+    } else {
+      // No face detected, reset streak
+      detectionStreak = { id: null, count: 0, descriptor: null };
     }
 
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 1000)); // faster polling
   }
 
   isRecognizing = false;
@@ -373,26 +410,39 @@ startSessionBtn.addEventListener('click', async () => {
 
 // ── End session ───────────────────────────────────────────────────────
 
-endSessionBtn.addEventListener('click', async () => {
-  if (!currentPerson) return;
+async function endCurrentSession(showModal = true) {
+  if (!currentPerson) {
+    console.warn('endCurrentSession called but currentPerson is null');
+    return;
+  }
+
+  console.log(`Ending session with: ${currentPerson.name}`);
 
   // Capture before clearing
   const sessionExchanges  = [...history];
   const sessionPersonName = currentPerson.name;
   const sessionAffection  = affection.total;
 
-  if (history.length > 0) {
-    const closenessGain = Math.ceil(history.length * 1.5 + Math.max(0, affection.total * 0.5));
-    const newCloseness  = Math.min(100, (currentPerson.closeness || 0) + closenessGain);
-    await db.saveConversation(currentPerson.id, history, affection.total, sessionStart);
-    await db.updatePerson(currentPerson.id, {
-      lastSeen:          new Date().toISOString(),
-      totalAffection:    currentPerson.totalAffection + affection.total,
-      conversationCount: currentPerson.conversationCount + 1,
-      closeness:         newCloseness,
-    });
+  try {
+    if (history.length > 0) {
+      const closenessGain = Math.ceil(history.length * 1.5 + Math.max(0, affection.total * 0.5));
+      const newCloseness  = Math.min(100, (currentPerson.closeness || 0) + closenessGain);
+      
+      console.log('Saving conversation and updating person data...');
+      await db.saveConversation(currentPerson.id, history, affection.total, sessionStart);
+      await db.updatePerson(currentPerson.id, {
+        lastSeen:          new Date().toISOString(),
+        totalAffection:    currentPerson.totalAffection + affection.total,
+        conversationCount: currentPerson.conversationCount + 1,
+        closeness:         newCloseness,
+      });
+    }
+  } catch (err) {
+    console.error('Failed to save session data to DB:', err);
+    showError('Failed to save session data. Check console for details.');
   }
 
+  // ALWAYS clear state even if DB failed
   currentPerson   = null;
   sessionStart    = null;
   history         = [];
@@ -404,16 +454,43 @@ endSessionBtn.addEventListener('click', async () => {
   updateAffectionMeter(0);
   resetDialogue();
   showEmptyChoices();
-  showPersonSelector();
+  resetToIdleState();
+  
+  // Consistently hide the session bar and decide what to show next
+  if (camera.isRunning) {
+    setHint('Scanning for faces…', true);
+    // Explicitly hide both to be safe
+    const bar = document.getElementById('session-bar');
+    bar.classList.add('hidden');
+    bar.style.display = 'none';
 
-  const people = await db.getAllPeople();
-  populatePersonSelect(people);
-  recognition.updateKnownPeople(people);
-
-  if (sessionExchanges.length > 0) {
-    showDebrief(sessionExchanges, sessionPersonName, sessionAffection);
+    const sel = document.getElementById('person-selector');
+    sel.classList.add('hidden');
+    sel.style.display = 'none';
+  } else {
+    showPersonSelector();
   }
-});
+
+  try {
+    const people = await db.getAllPeople();
+    populatePersonSelect(people);
+    recognition.updateKnownPeople(people);
+  } catch (err) {
+    console.error('Failed to refresh people list:', err);
+  }
+
+  if (showModal && sessionExchanges.length > 0) {
+    showDebrief(sessionExchanges, sessionPersonName, sessionAffection);
+  } else if (showModal) {
+    setHint(`Session with ${sessionPersonName} ended.`);
+  }
+}
+
+if (endSessionBtn) {
+  endSessionBtn.addEventListener('click', async () => {
+    await endCurrentSession(true);
+  });
+}
 
 // ── Camera ────────────────────────────────────────────────────────────
 
@@ -472,6 +549,15 @@ cameraStartBtn.addEventListener('click', async () => {
     const deviceId = cameraSelect.value || null;
     await camera.start(cameraFeed, deviceId);
     hideCameraOverlay();
+    resetToIdleState();
+    
+    // Auto-mode: hide the manual person selector once camera is active
+    const sel = document.getElementById('person-selector');
+    sel.classList.add('hidden');
+    sel.style.display = 'none';
+    
+    setHint('Scanning for faces…', true);
+
     await loadModels();
     recognitionLoop();
   } catch (err) {
@@ -485,6 +571,11 @@ cameraRefreshBtn.addEventListener('click', async () => {
   await enumerateCameras();
   cameraRefreshBtn.textContent = '↺';
   setCameraOverlayHint('List refreshed — select your camera and click Start.');
+});
+
+cameraManualBtn.addEventListener('click', () => {
+  hideCameraOverlay();
+  showPersonSelector();
 });
 
 async function loadModels() {

@@ -74,6 +74,7 @@
           </div>
           <button class="camera-start-btn" id="camera-start-btn">Enable camera</button>
           <div class="camera-overlay-hint" id="camera-overlay-hint"></div>
+          <button class="camera-manual-btn" id="camera-manual-btn">Or start manually (no camera)</button>
         </div>
       </div>
 
@@ -88,8 +89,8 @@
       </div>
     </div>
 
-    <!-- Person selector (shown when no active session) -->
-    <div class="person-selector" id="person-selector">
+    <!-- Person selector (shown when no active session and no camera) -->
+    <div class="person-selector hidden" id="person-selector" style="display: none">
       <div class="person-selector-inner">
         <div class="person-selector-label">— who are you talking to? —</div>
         <div class="person-selector-row">
@@ -131,7 +132,7 @@
           Type what they said below and press Generate ↓
         </div>
 
-        <div class="vn-input-row">
+        <div class="vn-input-row hidden" style="display: none">
           <button class="mic-btn" id="mic-btn" title="Click to speak">🎙</button>
           <input
             class="speech-input"

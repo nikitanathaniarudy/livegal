@@ -56,18 +56,40 @@ export class RecognitionTracker {
   }
 
   /**
-   * Detects a face and returns its descriptor.
+   * Detects faces and returns the descriptor of the largest one.
    * @param {HTMLVideoElement} videoEl
    * @returns {Promise<Float32Array|null>}
    */
   async getDescriptor(videoEl) {
     const faceapi = window.faceapi;
-    const detection = await faceapi
-      .detectSingleFace(videoEl)
-      .withFaceLandmarks()
-      .withFaceDescriptor();
-    
-    return detection ? detection.descriptor : null;
+    if (!this.isLoaded) return null;
+
+    try {
+      // Use explicit SSD MobileNet options for better control
+      const options = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 });
+      
+      const detections = await faceapi
+        .detectAllFaces(videoEl, options)
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+      
+      if (!detections || detections.length === 0) {
+        // console.log('No faces detected in frame');
+        return null;
+      }
+
+      console.log(`Detected ${detections.length} face(s)`);
+
+      // If multiple faces, pick the one with the largest bounding box
+      if (detections.length > 1) {
+        detections.sort((a, b) => b.detection.box.area - a.detection.box.area);
+      }
+      
+      return detections[0].descriptor;
+    } catch (err) {
+      console.error('Face detection error:', err);
+      return null;
+    }
   }
 
   /**
@@ -76,9 +98,14 @@ export class RecognitionTracker {
    * @returns {Object|null} The person from knownPeople or null
    */
   recognize(descriptor) {
-    if (!this.matcher) return null;
+    if (!this.matcher) {
+      console.log('No face matcher available (no known people with descriptors)');
+      return null;
+    }
     
     const match = this.matcher.findBestMatch(descriptor);
+    console.log(`Recognition match: ${match.label} (dist: ${match.distance.toFixed(3)})`);
+    
     if (match.label === 'unknown') return null;
     
     const personId = Number(match.label);
