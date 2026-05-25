@@ -114,7 +114,11 @@ async function recognitionLoop() {
   isRecognizing = true;
 
   while (camera.isRunning) {
-    if (!recognition.isLoaded) {
+    const conversationView = document.getElementById('view-conversation');
+    const isConversationViewActive = conversationView && !conversationView.classList.contains('view-hidden');
+
+    // Skip if already in a session, models not loaded, or NOT on the conversation tab
+    if (currentPerson || !recognition.isLoaded || !isConversationViewActive) {
       await new Promise(r => setTimeout(r, 1000));
       continue;
     }
