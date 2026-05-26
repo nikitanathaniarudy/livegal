@@ -2684,14 +2684,13 @@ header {
 /* ── History View ───────────────────────────────────────── */
 
 #view-history {
-  width: 100%;
-  max-width: 780px;
-  margin: 0 auto;
-  padding: 49px 32px 60px; /* 49px top padding to clear header */
+  width: 100vw;
+  margin: 0;
+  padding: 49px 0 0; /* 49px top padding to clear header */
 }
 
 .history-header {
-  margin-bottom: 24px;
+  padding: 24px 32px;
 }
 
 .history-view-title {
@@ -2817,13 +2816,12 @@ header {
 
 .history-graph-outer {
   position: relative;
-  width: 100%;
+  width: 100vw;
   height: calc(100vh - 120px);
-  background: rgba(10, 8, 20, 0.4);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  background: transparent;
+  border: none;
   overflow: hidden;
-  margin-top: 20px;
+  margin-top: 0;
 }
 
 #history-graph-canvas-wrap {
