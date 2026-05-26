@@ -783,7 +783,10 @@ function getSessionAxisValue(conv, metric) {
 
 let historyGraphCanvas = null;
 let historyGraphCtx = null;
-let historyNodes = []; // { x, y, r, conv, person }
+let historyNodes = []; // { x, y, targetY, currentY, r, conv, person }
+let isHistoryAnimating = false;
+let historyPanX = 0;
+let historyTargetPanX = 0;
 
 export function renderGlobalHistoryGraph(conversations, people) {
   const canvas = document.getElementById('history-graph-canvas');
@@ -806,22 +809,114 @@ export function renderGlobalHistoryGraph(conversations, people) {
   canvas.style.height = H + 'px';
 
   historyGraphCtx.scale(dpr, dpr);
-  historyNodes = [];
 
   if (sorted.length === 0) {
+    historyGraphCtx.clearRect(0, 0, W, H);
     historyGraphCtx.font = '12px DM Mono';
-    historyGraphCtx.fillStyle = 'var(--ink-dim)';
+    historyGraphCtx.fillStyle = getCSSVar('--ink-dim');
     historyGraphCtx.textAlign = 'center';
     historyGraphCtx.fillText('No sessions yet.', W / 2, H / 2);
     return;
   }
 
-  const PAD_X = 120;
-  const PAD_Y = 80;
+  const PAD_X = 140; 
+  const PAD_Y = 100;
   const innerH = H - PAD_Y * 2;
-  const stepX = sorted.length > 1 ? (W - PAD_X * 2) / (sorted.length - 1) : 0;
+  const stepX = 280; // Fixed width per session for horizontal scrolling
 
-  // Background Grid and Axis Labels
+  // Initialize or update nodes
+  const newNodes = sorted.map((conv, i) => {
+    const person = personMap.get(conv.personId) || { name: 'Unknown' };
+    const val = getSessionAxisValue(conv, metric);
+    const x = PAD_X + i * stepX;
+    const targetY = H - PAD_Y - (val * innerH);
+    const r = 18; // Consistent size
+
+    const existing = historyNodes.find(n => n.conv.startedAt === conv.startedAt);
+    return {
+      x,
+      y: existing ? existing.y : targetY,
+      targetY,
+      r,
+      conv,
+      person,
+      hover: 0
+    };
+  });
+
+  historyNodes = newNodes;
+  
+  // Center on latest node if we just started
+  if (historyPanX === 0 && historyNodes.length > 0) {
+    const latestX = historyNodes[historyNodes.length - 1].x;
+    historyTargetPanX = -(latestX - W / 2);
+    historyPanX = historyTargetPanX;
+  }
+
+  if (!isHistoryAnimating) {
+    isHistoryAnimating = true;
+    animateHistoryGraph();
+  }
+
+  // Event listener for hover/click/pan
+  if (!canvas.dataset.listenerAttached) {
+    let isDragging = false;
+    let startX = 0;
+
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left - historyPanX;
+      const my = e.clientY - rect.top;
+      
+      if (isDragging) {
+        historyTargetPanX += (e.clientX - startX);
+        historyPanX = historyTargetPanX;
+        startX = e.clientX;
+      }
+
+      historyNodes.forEach(n => {
+        const dist = Math.hypot(mx - n.x, my - n.y);
+        n.hover = dist < n.r + 10 ? 1 : 0;
+      });
+    });
+    
+    canvas.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      startX = e.clientX;
+      const clicked = historyNodes.find(n => n.hover);
+      if (clicked) showHistoryNodeDetails(clicked);
+    });
+
+    window.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      historyTargetPanX -= e.deltaX || e.deltaY;
+    }, { passive: false });
+
+    canvas.dataset.listenerAttached = 'true';
+  }
+}
+
+function animateHistoryGraph() {
+  if (!historyGraphCanvas || !document.getElementById('view-history') || document.getElementById('view-history').classList.contains('view-hidden')) {
+    isHistoryAnimating = false;
+    return;
+  }
+
+  const W = historyGraphCanvas.width / (window.devicePixelRatio || 1);
+  const H = historyGraphCanvas.height / (window.devicePixelRatio || 1);
+  const ctx = historyGraphCtx;
+  const metric = document.getElementById('history-metric-select')?.value || 'Warmth';
+
+  ctx.clearRect(0, 0, W, H);
+  
+  // Smooth panning
+  historyPanX += (historyTargetPanX - historyPanX) * 0.1;
+
+  // Background Labels (Static)
   const metricLabels = {
     'Warmth':       { top: 'WARM', bottom: 'COOL' },
     'Social Energy': { top: 'EXPRESSIVE', bottom: 'INTROVERTED' },
@@ -831,119 +926,95 @@ export function renderGlobalHistoryGraph(conversations, people) {
   };
   const labels = metricLabels[metric] || { top: 'HIGH', bottom: 'LOW' };
 
-  historyGraphCtx.font = 'bold 9px DM Mono';
-  historyGraphCtx.fillStyle = 'rgba(248, 200, 64, 0.4)';
-  historyGraphCtx.textAlign = 'center';
-  historyGraphCtx.fillText(labels.top, W / 2, 30);
-  historyGraphCtx.fillText(labels.bottom, W / 2, H - 20);
+  ctx.font = 'bold 10px DM Mono';
+  ctx.fillStyle = 'rgba(248, 200, 64, 0.4)';
+  ctx.textAlign = 'center';
+  ctx.fillText(labels.top, W / 2, 40);
+  ctx.fillText(labels.bottom, W / 2, H - 30);
 
-  // Center line
-  historyGraphCtx.beginPath();
-  historyGraphCtx.setLineDash([5, 5]);
-  historyGraphCtx.strokeStyle = 'rgba(192,130,255,0.15)';
-  historyGraphCtx.moveTo(PAD_X / 2, H / 2);
-  historyGraphCtx.lineTo(W - PAD_X / 2, H / 2);
-  historyGraphCtx.stroke();
-  historyGraphCtx.setLineDash([]);
+  ctx.save();
+  ctx.translate(historyPanX, 0);
 
-  // Calculate nodes
-  sorted.forEach((conv, i) => {
-    const x = sorted.length > 1 ? PAD_X + i * stepX : W / 2;
-    const val = getSessionAxisValue(conv, metric);
-    // val=1 is top, val=0 is bottom
-    const y = H - PAD_Y - (val * innerH);
-    const r = 14 + Math.min(10, (conv.exchanges?.length || 0) * 0.5);
-    
-    const person = personMap.get(conv.personId) || { name: 'Unknown' };
-    historyNodes.push({ x, y, r, conv, person, val });
+  // Update node vertical positions
+  historyNodes.forEach(node => {
+    node.y += (node.targetY - node.y) * 0.1;
   });
 
-  // Draw smooth timeline path
+  // Timeline path
   if (historyNodes.length > 1) {
-    historyGraphCtx.beginPath();
-    historyGraphCtx.lineWidth = 3;
-    const grad = historyGraphCtx.createLinearGradient(PAD_X, 0, W - PAD_X, 0);
-    grad.addColorStop(0, 'rgba(110, 184, 200, 0.3)');
-    grad.addColorStop(0.5, 'rgba(248, 200, 64, 0.4)');
-    grad.addColorStop(1, 'rgba(232, 121, 249, 0.3)');
-    historyGraphCtx.strokeStyle = grad;
-
-    historyGraphCtx.moveTo(historyNodes[0].x, historyNodes[0].y);
+    ctx.beginPath();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(248, 200, 64, 0.3)';
+    ctx.moveTo(historyNodes[0].x, historyNodes[0].y);
     for (let i = 0; i < historyNodes.length - 1; i++) {
       const p0 = historyNodes[i];
       const p1 = historyNodes[i + 1];
       const cp1x = p0.x + (p1.x - p0.x) / 2;
       const cp2x = p0.x + (p1.x - p0.x) / 2;
-      historyGraphCtx.bezierCurveTo(cp1x, p0.y, cp2x, p1.y, p1.x, p1.y);
+      ctx.bezierCurveTo(cp1x, p0.y, cp2x, p1.y, p1.x, p1.y);
     }
-    historyGraphCtx.stroke();
+    ctx.stroke();
   }
 
-  // Draw nodes with glow and labels
-  historyNodes.forEach((node, i) => {
+  // Draw Nodes and Labels
+  historyNodes.forEach((node) => {
     const varName = node.conv.finalAffection >= 0 ? '--choice-d' : '--choice-c';
     const color = getCSSVar(varName);
-    
-    // Outer glow
-    const shadowSize = 15;
-    historyGraphCtx.save();
-    historyGraphCtx.shadowBlur = shadowSize;
-    historyGraphCtx.shadowColor = color;
-    
-    // Node circle
-    historyGraphCtx.beginPath();
-    historyGraphCtx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
-    historyGraphCtx.fillStyle = getCSSVar('--paper2');
-    historyGraphCtx.fill();
-    historyGraphCtx.strokeStyle = color;
-    historyGraphCtx.lineWidth = 2;
-    historyGraphCtx.stroke();
-    historyGraphCtx.restore();
+    const hoverScale = 1 + (node.hover * 0.2);
+    const r = node.r * hoverScale;
+
+    // Node Circle
+    ctx.save();
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = color;
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = getCSSVar('--paper2');
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
 
     // Initial
-    historyGraphCtx.fillStyle = getCSSVar('--ink');
-    historyGraphCtx.font = 'bold 11px DM Mono';
-    historyGraphCtx.textAlign = 'center';
-    historyGraphCtx.textBaseline = 'middle';
-    historyGraphCtx.fillText(node.person.name[0], node.x, node.y);
+    ctx.fillStyle = getCSSVar('--ink');
+    ctx.font = `bold ${Math.round(11 * hoverScale)}px DM Mono`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(node.person.name[0], node.x, node.y);
 
-    // Readability background for labels
-    const label = node.person.name;
+    // NAME AND DATE (Always visible)
+    const label = node.person.name.toUpperCase();
     const date = formatDate(node.conv.startedAt);
-    historyGraphCtx.font = 'bold 10px DM Mono';
-    const tw = Math.max(historyGraphCtx.measureText(label).width, historyGraphCtx.measureText(date).width);
     
-    historyGraphCtx.fillStyle = 'rgba(12, 9, 22, 0.8)';
-    const rx = node.x - tw/2 - 5, ry = node.y + node.r + 8, rw = tw + 10, rh = 30;
-    if (historyGraphCtx.roundRect) {
-      historyGraphCtx.beginPath();
-      historyGraphCtx.roundRect(rx, ry, rw, rh, 4);
-      historyGraphCtx.fill();
+    // Label Pod Background
+    ctx.font = 'bold 10px DM Mono';
+    const tw = Math.max(ctx.measureText(label).width, ctx.measureText(date).width);
+    ctx.fillStyle = 'rgba(20, 16, 35, 0.9)';
+    const lx = node.x - tw/2 - 10, ly = node.y + r + 12, lw = tw + 20, lh = 36;
+    
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(lx, ly, lw, lh, 6);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+      ctx.stroke();
     } else {
-      historyGraphCtx.fillRect(rx, ry, rw, rh);
+      ctx.fillRect(lx, ly, lw, lh);
     }
 
-    // Labels
-    historyGraphCtx.fillStyle = getCSSVar('--ink');
-    historyGraphCtx.textAlign = 'center';
-    historyGraphCtx.fillText(label, node.x, node.y + node.r + 20);
-    historyGraphCtx.font = '8px DM Mono';
-    historyGraphCtx.fillStyle = getCSSVar('--ink-dim');
-    historyGraphCtx.fillText(date, node.x, node.y + node.r + 32);
+    // Text
+    ctx.fillStyle = node.hover ? 'var(--accent)' : '#ffffff';
+    ctx.font = 'bold 11px DM Mono';
+    ctx.fillText(label, node.x, node.y + r + 26);
+    
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '9px DM Mono';
+    ctx.fillText(date, node.x, node.y + r + 40);
   });
 
-  // Event listener logic remains similar but ensures single attachment
-  if (!canvas.dataset.listenerAttached) {
-    canvas.addEventListener('mousedown', (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const clicked = historyNodes.find(n => Math.hypot(mx - n.x, my - n.y) < n.r + 15);
-      if (clicked) showHistoryNodeDetails(clicked);
-      else document.getElementById('history-node-details').classList.add('hidden');
-    });
-    canvas.dataset.listenerAttached = 'true';
-  }
+  ctx.restore();
+  requestAnimationFrame(animateHistoryGraph);
 }
 
 function showHistoryNodeDetails(node) {
