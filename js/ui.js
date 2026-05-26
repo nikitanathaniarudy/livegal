@@ -10,6 +10,13 @@ const CLOSENESS_TIERS = [
   { max: 100, label: 'Confidant',    color: '#c8a96e' },
 ];
 
+const TYPE_COLORS = {
+  Kind:      'var(--choice-a)',
+  Funny:     'var(--choice-b)',
+  Sarcastic: 'var(--choice-c)',
+  Cold:      'var(--choice-d)',
+};
+
 function closenessInfo(val = 0) {
   const tier = CLOSENESS_TIERS.find(t => val <= t.max) || CLOSENESS_TIERS.at(-1);
   return { ...tier, pct: Math.round(val) };
@@ -363,28 +370,137 @@ export function showDebrief(exchanges, personName, totalAffection) {
   });
 }
 
+function renderTimelineGraph(exchanges) {
+  if (!exchanges.length) return '';
+
+  const chron = [...exchanges].reverse();
+  const W = 716, H = 200;
+  const PAD_X = 60, PAD_Y = 40;
+  const innerW = W - PAD_X * 2;
+  const innerH = H - PAD_Y * 2;
+
+  // Map labels to vertical positions (-1 to 1)
+  const Y_MAP = {
+    Kind:      -0.8,
+    Funny:     -0.3,
+    Sarcastic:  0.3,
+    Cold:       0.8,
+  };
+
+  const points = chron.map((ex, i) => {
+    const x = PAD_X + (chron.length > 1 ? (i / (chron.length - 1)) * innerW : innerW / 2);
+    const yValue = Y_MAP[ex.label] || 0;
+    const y = H / 2 + yValue * innerH / 2;
+    return { x, y, ...ex };
+  });
+
+  // Generate smooth path
+  let pathD = '';
+  if (points.length > 1) {
+    pathD = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i];
+      const p1 = points[i + 1];
+      const cp1x = p0.x + (p1.x - p0.x) / 2;
+      const cp2x = p0.x + (p1.x - p0.x) / 2;
+      pathD += ` C ${cp1x} ${p0.y}, ${cp2x} ${p1.y}, ${p1.x} ${p1.y}`;
+    }
+  }
+
+  const nodes = points.map((p, i) => {
+    const color = TYPE_COLORS[p.label] || 'var(--ink-dim)';
+    const delta = p.affectionDelta || 0;
+    const isGood = delta > 0;
+    const isBad  = delta < 0;
+    
+    // Label placement
+    const labelY = p.y < H / 2 ? p.y - 12 : p.y + 22;
+    const timeText = i === 0 ? 'START' : i === points.length - 1 ? 'END' : '';
+
+    return `
+      <g class="graph-node" data-index="${i}">
+        <circle cx="${p.x}" cy="${p.y}" r="5" fill="${color}" stroke="var(--paper)" stroke-width="2" />
+        ${isGood ? `<circle cx="${p.x}" cy="${p.y}" r="8" fill="none" stroke="${color}" stroke-width="1" opacity="0.4" />` : ''}
+        <text x="${p.x}" y="${labelY}" text-anchor="middle" font-size="8" fill="${color}" font-weight="600">${p.label.toUpperCase()}</text>
+        ${timeText ? `<text x="${p.x}" y="${labelY + (p.y < H / 2 ? -10 : 10)}" text-anchor="middle" font-size="7" fill="var(--ink-dim)" opacity="0.5">${timeText}</text>` : ''}
+      </g>
+    `;
+  }).join('');
+
+  return `
+    <div class="debrief-graph-wrap">
+      <div class="graph-y-axis">
+        <span class="y-label top">EMOTION</span>
+        <span class="y-label bottom">LOGIC</span>
+      </div>
+      <svg class="debrief-graph-svg" viewBox="0 0 ${W} ${H}">
+        <!-- Grid lines -->
+        <line x1="${PAD_X}" y1="${H / 2}" x2="${W - PAD_X}" y2="${H / 2}" stroke="var(--border)" stroke-width="1" stroke-dasharray="4 4" opacity="0.3"/>
+        <!-- Connection path -->
+        <path d="${pathD}" fill="none" stroke="url(#lineGrad)" stroke-width="3" stroke-linecap="round" opacity="0.6" />
+        <defs>
+          <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="var(--choice-a)" />
+            <stop offset="33%" stop-color="var(--choice-b)" />
+            <stop offset="66%" stop-color="var(--choice-c)" />
+            <stop offset="100%" stop-color="var(--choice-d)" />
+          </linearGradient>
+        </defs>
+        ${nodes}
+      </svg>
+    </div>
+  `;
+}
+
 function buildDebriefBody(exchanges, totalAffection) {
-  const chron   = [...exchanges].reverse(); // exchanges are newest-first
+  const chron   = [...exchanges].reverse();
   const scored  = chron.filter(e => e.affectionDelta !== undefined);
   const best    = scored.length ? scored.reduce((b, e) => e.affectionDelta > b.affectionDelta ? e : b) : null;
   const affCls  = totalAffection > 0 ? 'pos' : totalAffection < 0 ? 'neg' : '';
   const affSign = totalAffection > 0 ? '+' : '';
 
+  // Calculate summary stats
+  const keyDecisions = scored.filter(e => Math.abs(e.affectionDelta) >= 5).length;
+  const topicTurns = chron.reduce((count, ex, i) => {
+    if (i === 0) return count;
+    const prev = chron[i - 1];
+    // A turn is when we switch between warm (Kind/Funny) and cool (Sarcastic/Cold)
+    const isWarm = (l) => l === 'Kind' || l === 'Funny';
+    if (isWarm(prev.label) !== isWarm(ex.label)) return count + 1;
+    return count;
+  }, 0);
+
+  const summaryHTML = `
+    <div class="debrief-summary-header">
+      Total <span class="highlight">${chron.length}</span> exchanges, 
+      identified <span class="highlight">${keyDecisions}</span> key decisions 
+      and <span class="highlight">${topicTurns}</span> topic turning points.
+    </div>
+  `;
+
   const statsHTML = `
     <div class="debrief-stats">
       <div class="debrief-stat">
-        <span class="debrief-stat-label">exchanges</span>
-        <span class="debrief-stat-value">${chron.length}</span>
-      </div>
-      <div class="debrief-stat">
-        <span class="debrief-stat-label">total affection</span>
+        <span class="debrief-stat-label">Affection Change</span>
         <span class="debrief-stat-value ${affCls}">${affSign}${totalAffection}</span>
       </div>
       <div class="debrief-stat">
-        <span class="debrief-stat-label">best moment</span>
+        <span class="debrief-stat-label">Response Balance</span>
+        <div class="debrief-balance-bars">
+          ${['Kind', 'Funny', 'Sarcastic', 'Cold'].map(l => {
+            const count = chron.filter(ex => ex.label === l).length;
+            const pct = chron.length ? (count / chron.length) * 100 : 0;
+            return `<div class="debrief-balance-bar" title="${l}: ${count}" style="width:${pct}%;background:${TYPE_COLORS[l]}"></div>`;
+          }).join('')}
+        </div>
+      </div>
+      <div class="debrief-stat">
+        <span class="debrief-stat-label">Peak Resonance</span>
         <span class="debrief-stat-value">${best ? `${best.emoji || ''} ${best.label}` : '—'}</span>
       </div>
     </div>`;
+
+  const graphHTML = renderTimelineGraph(exchanges);
 
   const timelineHTML = chron.map((ex, i) => {
     const hasDelta = ex.affectionDelta !== undefined;
@@ -431,7 +547,7 @@ function buildDebriefBody(exchanges, totalAffection) {
       </div>`;
   }).join('');
 
-  return statsHTML + `<div class="debrief-timeline">${timelineHTML}</div>`;
+  return summaryHTML + statsHTML + graphHTML + `<div class="debrief-timeline-label">— event log —</div>` + `<div class="debrief-timeline">${timelineHTML}</div>`;
 }
 
 // Close handlers — run once at module load
@@ -591,6 +707,10 @@ function opponentProfileCard(name, profile, obsCount) {
 
 // ── Utility ──────────────────────────────────────────────────────────
 
+function getCSSVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#ffffff';
+}
+
 function formatDate(isoString, includeTime = false) {
   if (!isoString) return '—';
   const d = new Date(isoString);
@@ -601,13 +721,6 @@ function formatDate(isoString, includeTime = false) {
 }
 
 // ── Analytics view ───────────────────────────────────────────────────
-
-const TYPE_COLORS = {
-  Kind:      'var(--choice-a)',
-  Funny:     'var(--choice-b)',
-  Sarcastic: 'var(--choice-c)',
-  Cold:      'var(--choice-d)',
-};
 
 export function renderAnalytics(data) {
   const wrap = document.getElementById('analytics-wrap');
@@ -630,6 +743,257 @@ export function renderAnalytics(data) {
 
   // Animate bars after render (needs one tick so elements exist)
   requestAnimationFrame(() => animateBars(data));
+}
+
+function getSessionAxisValue(conv, metric) {
+  const exchanges = conv.exchanges || [];
+  if (exchanges.length === 0) return 0.5;
+
+  if (metric === 'Affection') {
+    // -20 to +20 range mapped to 0-1
+    return Math.max(0, Math.min(1, (conv.finalAffection + 20) / 40));
+  }
+
+  const counts = { Kind: 0, Funny: 0, Sarcastic: 0, Cold: 0 };
+  exchanges.forEach(ex => { if (counts[ex.label] !== undefined) counts[ex.label]++; });
+  
+  const total = exchanges.length;
+  const pct = {
+    Kind: counts.Kind / total,
+    Funny: counts.Funny / total,
+    Sarcastic: counts.Sarcastic / total,
+    Cold: counts.Cold / total
+  };
+
+  switch (metric) {
+    case 'Social Energy':
+      return Math.min(1, (pct.Kind + pct.Funny) / 0.75);
+    case 'Warmth':
+      const warmSum = pct.Kind + pct.Cold;
+      return warmSum > 0 ? pct.Kind / warmSum : 0.5;
+    case 'Tone':
+      return Math.min(1, pct.Funny / 0.40);
+    case 'Style':
+      const maxPct = Math.max(pct.Kind, pct.Funny, pct.Sarcastic, pct.Cold);
+      return Math.min(1, Math.max(0, (maxPct - 0.25) / 0.60));
+    default:
+      return 0.5;
+  }
+}
+
+let historyGraphCanvas = null;
+let historyGraphCtx = null;
+let historyNodes = []; // { x, y, r, conv, person }
+
+export function renderGlobalHistoryGraph(conversations, people) {
+  const canvas = document.getElementById('history-graph-canvas');
+  const metricSelect = document.getElementById('history-metric-select');
+  if (!canvas || !metricSelect) return;
+  
+  const metric = metricSelect.value;
+  historyGraphCanvas = canvas;
+  historyGraphCtx = canvas.getContext('2d');
+  const personMap = new Map(people.map(p => [p.id, p]));
+  const sorted = [...conversations].sort((a, b) => new Date(a.startedAt) - new Date(b.startedAt));
+
+  const dpr = window.devicePixelRatio || 1;
+  const wrap = canvas.parentElement;
+  const W = wrap.clientWidth;
+  const H = wrap.clientHeight || 500;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+
+  historyGraphCtx.scale(dpr, dpr);
+  historyNodes = [];
+
+  if (sorted.length === 0) {
+    historyGraphCtx.font = '12px DM Mono';
+    historyGraphCtx.fillStyle = 'var(--ink-dim)';
+    historyGraphCtx.textAlign = 'center';
+    historyGraphCtx.fillText('No sessions yet.', W / 2, H / 2);
+    return;
+  }
+
+  const PAD_X = 120;
+  const PAD_Y = 80;
+  const innerH = H - PAD_Y * 2;
+  const stepX = sorted.length > 1 ? (W - PAD_X * 2) / (sorted.length - 1) : 0;
+
+  // Background Grid and Axis Labels
+  const metricLabels = {
+    'Warmth':       { top: 'WARM', bottom: 'COOL' },
+    'Social Energy': { top: 'EXPRESSIVE', bottom: 'INTROVERTED' },
+    'Tone':         { top: 'WITTY', bottom: 'SERIOUS' },
+    'Style':        { top: 'FOCUSED', bottom: 'VERSATILE' },
+    'Affection':    { top: 'HIGH IMPACT', bottom: 'LOW IMPACT' }
+  };
+  const labels = metricLabels[metric] || { top: 'HIGH', bottom: 'LOW' };
+
+  historyGraphCtx.font = 'bold 9px DM Mono';
+  historyGraphCtx.fillStyle = 'rgba(248, 200, 64, 0.4)';
+  historyGraphCtx.textAlign = 'center';
+  historyGraphCtx.fillText(labels.top, W / 2, 30);
+  historyGraphCtx.fillText(labels.bottom, W / 2, H - 20);
+
+  // Center line
+  historyGraphCtx.beginPath();
+  historyGraphCtx.setLineDash([5, 5]);
+  historyGraphCtx.strokeStyle = 'rgba(192,130,255,0.15)';
+  historyGraphCtx.moveTo(PAD_X / 2, H / 2);
+  historyGraphCtx.lineTo(W - PAD_X / 2, H / 2);
+  historyGraphCtx.stroke();
+  historyGraphCtx.setLineDash([]);
+
+  // Calculate nodes
+  sorted.forEach((conv, i) => {
+    const x = sorted.length > 1 ? PAD_X + i * stepX : W / 2;
+    const val = getSessionAxisValue(conv, metric);
+    // val=1 is top, val=0 is bottom
+    const y = H - PAD_Y - (val * innerH);
+    const r = 14 + Math.min(10, (conv.exchanges?.length || 0) * 0.5);
+    
+    const person = personMap.get(conv.personId) || { name: 'Unknown' };
+    historyNodes.push({ x, y, r, conv, person, val });
+  });
+
+  // Draw smooth timeline path
+  if (historyNodes.length > 1) {
+    historyGraphCtx.beginPath();
+    historyGraphCtx.lineWidth = 3;
+    const grad = historyGraphCtx.createLinearGradient(PAD_X, 0, W - PAD_X, 0);
+    grad.addColorStop(0, 'rgba(110, 184, 200, 0.3)');
+    grad.addColorStop(0.5, 'rgba(248, 200, 64, 0.4)');
+    grad.addColorStop(1, 'rgba(232, 121, 249, 0.3)');
+    historyGraphCtx.strokeStyle = grad;
+
+    historyGraphCtx.moveTo(historyNodes[0].x, historyNodes[0].y);
+    for (let i = 0; i < historyNodes.length - 1; i++) {
+      const p0 = historyNodes[i];
+      const p1 = historyNodes[i + 1];
+      const cp1x = p0.x + (p1.x - p0.x) / 2;
+      const cp2x = p0.x + (p1.x - p0.x) / 2;
+      historyGraphCtx.bezierCurveTo(cp1x, p0.y, cp2x, p1.y, p1.x, p1.y);
+    }
+    historyGraphCtx.stroke();
+  }
+
+  // Draw nodes with glow and labels
+  historyNodes.forEach((node, i) => {
+    const varName = node.conv.finalAffection >= 0 ? '--choice-d' : '--choice-c';
+    const color = getCSSVar(varName);
+    
+    // Outer glow
+    const shadowSize = 15;
+    historyGraphCtx.save();
+    historyGraphCtx.shadowBlur = shadowSize;
+    historyGraphCtx.shadowColor = color;
+    
+    // Node circle
+    historyGraphCtx.beginPath();
+    historyGraphCtx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+    historyGraphCtx.fillStyle = getCSSVar('--paper2');
+    historyGraphCtx.fill();
+    historyGraphCtx.strokeStyle = color;
+    historyGraphCtx.lineWidth = 2;
+    historyGraphCtx.stroke();
+    historyGraphCtx.restore();
+
+    // Initial
+    historyGraphCtx.fillStyle = getCSSVar('--ink');
+    historyGraphCtx.font = 'bold 11px DM Mono';
+    historyGraphCtx.textAlign = 'center';
+    historyGraphCtx.textBaseline = 'middle';
+    historyGraphCtx.fillText(node.person.name[0], node.x, node.y);
+
+    // Readability background for labels
+    const label = node.person.name;
+    const date = formatDate(node.conv.startedAt);
+    historyGraphCtx.font = 'bold 10px DM Mono';
+    const tw = Math.max(historyGraphCtx.measureText(label).width, historyGraphCtx.measureText(date).width);
+    
+    historyGraphCtx.fillStyle = 'rgba(12, 9, 22, 0.8)';
+    const rx = node.x - tw/2 - 5, ry = node.y + node.r + 8, rw = tw + 10, rh = 30;
+    if (historyGraphCtx.roundRect) {
+      historyGraphCtx.beginPath();
+      historyGraphCtx.roundRect(rx, ry, rw, rh, 4);
+      historyGraphCtx.fill();
+    } else {
+      historyGraphCtx.fillRect(rx, ry, rw, rh);
+    }
+
+    // Labels
+    historyGraphCtx.fillStyle = getCSSVar('--ink');
+    historyGraphCtx.textAlign = 'center';
+    historyGraphCtx.fillText(label, node.x, node.y + node.r + 20);
+    historyGraphCtx.font = '8px DM Mono';
+    historyGraphCtx.fillStyle = getCSSVar('--ink-dim');
+    historyGraphCtx.fillText(date, node.x, node.y + node.r + 32);
+  });
+
+  // Event listener logic remains similar but ensures single attachment
+  if (!canvas.dataset.listenerAttached) {
+    canvas.addEventListener('mousedown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const clicked = historyNodes.find(n => Math.hypot(mx - n.x, my - n.y) < n.r + 15);
+      if (clicked) showHistoryNodeDetails(clicked);
+      else document.getElementById('history-node-details').classList.add('hidden');
+    });
+    canvas.dataset.listenerAttached = 'true';
+  }
+}
+
+function showHistoryNodeDetails(node) {
+  const panel = document.getElementById('history-node-details');
+  const nameEl = document.getElementById('details-person-name');
+  const contentEl = document.getElementById('details-content');
+  
+  nameEl.textContent = `Session with ${node.person.name}`;
+  
+  const aff = node.conv.finalAffection;
+  const affCls = aff > 0 ? 'pos' : aff < 0 ? 'neg' : 'zero';
+  const affSign = aff > 0 ? '+' : '';
+  
+  // Re-use timeline graph rendering inside the details panel
+  const graphHTML = renderTimelineGraph(node.conv.exchanges || []);
+  
+  contentEl.innerHTML = `
+    <div class="history-details-meta">
+      <div class="history-details-stat">
+        <span class="label">DATE</span>
+        <span class="value">${formatDate(node.conv.startedAt, true)}</span>
+      </div>
+      <div class="history-details-stat">
+        <span class="label">AFFECTION</span>
+        <span class="value ${affCls}">${affSign}${aff}</span>
+      </div>
+    </div>
+    <div class="history-details-graph-wrap">
+      ${graphHTML}
+    </div>
+    <div class="history-details-log">
+      ${(node.conv.exchanges || []).map(ex => `
+        <div class="details-log-entry">
+          <div class="said">${ex.said}</div>
+          <div class="resp">↳ ${ex.text}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  
+  panel.classList.remove('hidden');
+}
+
+document.getElementById('details-close')?.addEventListener('click', () => {
+  document.getElementById('history-node-details').classList.add('hidden');
+});
+
+export function renderGlobalHistory(conversations, people) {
+  // Keeping this as a fallback or for other uses
+  console.log('renderGlobalHistory fallback');
 }
 
 function archetypeCard(data) {

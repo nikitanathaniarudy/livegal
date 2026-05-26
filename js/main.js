@@ -19,7 +19,7 @@ import {
   setCameraOverlayHint, hideCameraOverlay, setCameraAnalyzing,
   populatePersonSelect, showSessionBar, showPersonSelector, resetToIdleState,
   renderDirectory, renderPersonDetail, renderAnalytics,
-  showDebrief,
+  showDebrief, renderGlobalHistory, renderGlobalHistoryGraph,
 } from './ui.js';
 
 // ── Core objects ──────────────────────────────────────────────────────
@@ -291,22 +291,41 @@ async function startSession(person, autoRecognized = false) {
   speechInput.focus();
 }
 
+// ── Global History State ──────────────────────────────────────────────
+
+let lastHistoryData = { conversations: [], people: [] };
+
+document.getElementById('history-metric-select')?.addEventListener('change', () => {
+  renderGlobalHistoryGraph(lastHistoryData.conversations, lastHistoryData.people);
+});
+
 // ── Navigation ────────────────────────────────────────────────────────
 
 document.querySelectorAll('.nav-tab').forEach(tab => {
   tab.addEventListener('click', async () => {
+    console.log('Tab clicked:', tab.dataset.view);
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
 
     const view = tab.dataset.view;
     document.getElementById('view-conversation').classList.toggle('view-hidden', view !== 'conversation');
     document.getElementById('view-directory').classList.toggle('view-hidden', view !== 'directory');
+    document.getElementById('view-history').classList.toggle('view-hidden', view !== 'history');
     document.getElementById('view-analytics').classList.toggle('view-hidden', view !== 'analytics');
     document.getElementById('view-network').classList.toggle('view-hidden', view !== 'network');
 
     if (view === 'directory') {
       const people = await db.getAllPeople();
       renderDirectory(people);
+    }
+
+    if (view === 'history') {
+      const [people, conversations] = await Promise.all([
+        db.getAllPeople(),
+        db.getAllConversations(),
+      ]);
+      lastHistoryData = { conversations, people };
+      renderGlobalHistoryGraph(conversations, people);
     }
 
     if (view === 'analytics') {
