@@ -731,11 +731,22 @@ async function generate() {
   }
 
   try {
-    const [context, relationships] = await Promise.all([
+    const [memories, relationships] = await Promise.all([
       rag.retrieve(said),
       currentPerson ? db.getRelationshipsForPerson(currentPerson.id) : Promise.resolve([]),
     ]);
-    const options = await fetchOptions(said, modelInput.value.trim() || DEFAULT_MODEL, context, relationships, playerName);
+
+    // Pass the last 5 exchanges from current session as immediate history
+    const recentHistory = [...history].slice(0, 5).reverse();
+
+    const options = await fetchOptions(
+      said, 
+      modelInput.value.trim() || DEFAULT_MODEL, 
+      recentHistory,
+      memories, 
+      relationships, 
+      playerName
+    );
     pendingOptions = options;
     renderChoices(options, handlePick);
     setStatus('');

@@ -9,10 +9,11 @@ import { OLLAMA_URL, RESPONSE_TYPES } from './config.js';
 /**
  * @param {string} said
  * @param {string} model
- * @param {Array}  context - relevant past exchanges from RAG (may be empty)
+ * @param {Array}  recentHistory - the last few exchanges of the current session (chronological)
+ * @param {Array}  memories - relevant past exchanges from RAG (similarity-based)
  */
-export async function fetchOptions(said, model, context = [], relationships = [], playerName = '') {
-  const prompt = buildPrompt(said, context, relationships, playerName);
+export async function fetchOptions(said, model, recentHistory = [], memories = [], relationships = [], playerName = '') {
+  const prompt = buildPrompt(said, recentHistory, memories, relationships, playerName);
 
   const res = await fetch(OLLAMA_URL, {
     method: 'POST',
@@ -35,15 +36,27 @@ export async function fetchOptions(said, model, context = [], relationships = []
   return options;
 }
 
-function buildPrompt(said, context, relationships = [], playerName = '') {
+function buildPrompt(said, recentHistory = [], memories = [], relationships = [], playerName = '') {
   const labels = RESPONSE_TYPES.map(t => t.label).join(', ');
 
-  const contextBlock = context.length
-    ? `\nFrom earlier in this conversation you already know:\n${
-        context.map(c =>
-          `- They said: "${c.said.replace(/"/g, "'")}" and you replied: "${c.text.replace(/"/g, "'")}"`
+  const historyBlock = recentHistory.length
+    ? `\nImmediate Conversation History (chronological):\n${
+        recentHistory.map(c =>
+          `- They said: "${c.said.replace(/"/g, "'")}" | You replied: "${c.text.replace(/"/g, "'")}"`
         ).join('\n')
-      }\nUse this as memory — if the current message references something from above, acknowledge it naturally.\n`
+      }\n`
+    : '';
+
+  const memoryBlock = memories.length
+    ? `\nRelevant Past Memories (from older sessions or distant context):\n${
+        memories.map(c =>
+          `- They said: "${c.said.replace(/"/g, "'")}" | You replied: "${c.text.replace(/"/g, "'")}"`
+        ).join('\n')
+      }\n`
+    : '';
+
+  const contextInstruction = (historyBlock || memoryBlock)
+    ? `Use the history and memories provided above to stay consistent and refer back to previous topics naturally. Do not repeat yourself.\n`
     : '';
 
   // Deduplicate relationships by person name, keep most recent per name
@@ -70,7 +83,7 @@ function buildPrompt(said, context, relationships = [], playerName = '') {
     ? `You are ${playerName}, the player character in a real-life visual novel / galgame simulator.`
     : `You are the player character in a real-life visual novel / galgame simulator.`;
 
-  return `${identity}${contextBlock}${relationshipBlock}
+  return `${identity}${historyBlock}${memoryBlock}${contextInstruction}${relationshipBlock}
 Someone just said to you: "${said.replace(/"/g, "'")}"
 
 Generate exactly 4 short response options (1-2 sentences each).
