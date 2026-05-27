@@ -6,8 +6,8 @@
   <title>Live Gal Game ✦</title>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cinzel:wght@400;600&family=Lora:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" href="assets/window_icon.png">
-  <link rel="stylesheet" href="css/style.css?v=11">
-  <script>console.log('HTML Version: [v11 - borderless-blend]');</script>
+  <link rel="stylesheet" href="css/style.css?v=20">
+  <script>console.log('HTML Version: [v20 - story-mode]');</script>
   <style>
     /* Critical fallback styles for the registration modal */
     .face-reg-backdrop {
@@ -40,6 +40,30 @@
   <div class="stars-2"></div>
   <div class="stars-3"></div>
 
+  <!-- ══════════════════ HOMEPAGE / TITLE SCREEN ═══════════════════ -->
+  <div id="homepage" class="homepage">
+    <div class="homepage-content">
+      <div class="homepage-logo">Live Gal Game <span>✦</span></div>
+      <div class="homepage-tagline">a real-life visual novel experience</div>
+
+      <div class="homepage-panel">
+        <div class="hp-field">
+          <label class="hp-label">your name</label>
+          <input type="text" id="hp-name" placeholder="enter your name…" spellcheck="false" maxlength="32"/>
+        </div>
+        <div class="hp-field">
+          <label class="hp-label">persona</label>
+          <select id="hp-char" class="hp-select"></select>
+        </div>
+        <div class="hp-field">
+          <label class="hp-label">response language</label>
+          <select id="hp-lang" class="hp-select"></select>
+        </div>
+        <button id="hp-start">Start Playing →</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Header ──────────────────────────────────────────── -->
   <header>
     <div class="logo">Live Gal Game <span>✦</span></div>
@@ -48,7 +72,7 @@
       <button class="nav-tab"        data-view="directory">Directory</button>
       <button class="nav-tab"        data-view="history">History</button>
       <button class="nav-tab"        data-view="analytics">Analytics</button>
-      <button class="nav-tab"        data-view="network">Network</button>
+      <button class="nav-tab"        data-view="story">Story</button>
     </nav>
     <div class="player-pill" title="Click to change your name">
       <span class="player-pill-label">you:</span>
@@ -67,19 +91,79 @@
     </div>
     <div class="model-pill">
       <div class="status-dot" id="status-dot"></div>
-      <span>model:</span>
-      <input type="text" id="model-input" value="llama3.1:8b" spellcheck="false" title="Ollama model name"/>
+    </div>
+    <div class="char-pill">
+      <span class="char-pill-label">persona:</span>
+      <select id="char-select"></select>
+    </div>
+    <div class="lang-pill">
+      <span class="lang-pill-label">lang:</span>
+      <select id="lang-select"></select>
     </div>
   </header>
 
-  <!-- ── Player name setup modal ──────────────────────────── -->
+  <!-- ── Onboarding / Settings Modal ──────────────────────────── -->
   <div id="player-setup-modal" class="player-setup-modal hidden">
     <div class="player-setup-panel">
-      <div class="player-setup-eyebrow">welcome</div>
-      <div class="player-setup-title">what's your name?</div>
-      <div class="player-setup-sub">The AI will respond to you as this person.</div>
-      <input type="text" id="player-setup-input" placeholder="your name…" spellcheck="false" maxlength="32"/>
-      <button id="player-setup-ok">Start playing</button>
+      <div class="player-setup-eyebrow">welcome to</div>
+      <div class="player-setup-title">Live Gal Game ✦</div>
+      <div class="player-setup-sub">Set up your profile to start playing.</div>
+
+      <div class="setup-field">
+        <label class="setup-label">your name</label>
+        <input type="text" id="player-setup-input" placeholder="enter your name…" spellcheck="false" maxlength="32"/>
+      </div>
+
+      <div class="setup-field">
+        <label class="setup-label">persona</label>
+        <select id="setup-char-select" class="setup-select"></select>
+      </div>
+
+      <div class="setup-field">
+        <label class="setup-label">response language</label>
+        <select id="setup-lang-select" class="setup-select"></select>
+      </div>
+
+      <button id="player-setup-ok">Start Playing →</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════ SCENARIO / NARRATOR SCREEN ═══════════════ -->
+  <div id="scenario-screen" class="scenario-screen hidden">
+    <div class="scenario-inner">
+
+      <!-- Header -->
+      <div class="scenario-header">
+        <div class="scenario-eyebrow" id="scenario-eyebrow">scene</div>
+        <div class="scenario-title" id="scenario-title"></div>
+        <div class="scenario-char-label" id="scenario-char-label"></div>
+      </div>
+
+      <div class="scenario-divider"></div>
+
+      <!-- Setup — narrator text -->
+      <div class="scenario-setup-wrap">
+        <div class="scenario-narrator-label">— the situation —</div>
+        <div class="scenario-text" id="scenario-text"></div>
+      </div>
+
+      <!-- Roles — shown after setup types out -->
+      <div class="scenario-roles hidden" id="scenario-roles">
+        <div class="scenario-divider"></div>
+        <div class="scenario-roles-grid">
+          <div class="scenario-role-card scenario-role-you">
+            <div class="scenario-role-label">your role</div>
+            <div class="scenario-role-text" id="scenario-role-player"></div>
+          </div>
+          <div class="scenario-role-divider"></div>
+          <div class="scenario-role-card scenario-role-them">
+            <div class="scenario-role-label">their role</div>
+            <div class="scenario-role-text" id="scenario-role-friend"></div>
+          </div>
+        </div>
+        <button class="scenario-begin-btn" id="scenario-begin-btn">Begin →</button>
+      </div>
+
     </div>
   </div>
 
@@ -107,6 +191,16 @@
 
       <!-- Score popup floats in the middle of the stage -->
       <div class="score-popup" id="score-popup"></div>
+
+      <!-- Character sprite — reacts to responses -->
+      <div class="sprite-wrap" id="sprite-wrap">
+        <canvas id="sprite-canvas"></canvas>
+      </div>
+
+      <!-- Response choices — positioned next to sprite -->
+      <div class="choices-grid" id="choices-grid">
+        <div class="empty-choices">Options will appear here after you generate</div>
+      </div>
     </div>
 
     <!-- Person selector (shown when no active session and no camera) -->
@@ -131,16 +225,11 @@
       </div>
     </div>
 
-    <!-- Bottom UI: choices + VN dialogue box -->
+    <!-- Bottom UI: VN dialogue box only -->
     <div class="vn-bottom">
 
       <div id="error-container"></div>
       <div class="transcript-hint" id="transcript-hint"></div>
-
-      <!-- Response choices -->
-      <div class="choices-grid" id="choices-grid">
-        <div class="empty-choices">Options will appear here after you generate</div>
-      </div>
 
       <!-- VN Dialogue Box -->
       <div class="vn-dialogue-box">
@@ -217,24 +306,19 @@
     </div>
   </div>
 
-  <!-- ═══════════════ NETWORK VIEW ═══════════════ -->
-  <div id="view-network" class="view-hidden">
-    <div class="network-header">
-      <span class="network-title">— relationship network —</span>
-      <span class="network-legend">
-        <span class="legend-item" style="color:#22d3ee">— friend</span>
-        <span class="legend-item" style="color:#e879f9">— family</span>
-        <span class="legend-item" style="color:#fb923c">— romantic</span>
-        <span class="legend-item" style="color:#4ade80">— work</span>
-      </span>
-    </div>
-    <div class="graph-wrap" id="graph-wrap">
-      <canvas id="graph-canvas"></canvas>
-      <div class="graph-empty hidden" id="graph-empty">
-        No relationships found yet.<br>
-        Conversations where someone names another person will appear here.
+  <!-- ═══════════════ STORY VIEW ═══════════════ -->
+  <div id="view-story" class="view-hidden">
+    <div class="story-view-header">
+      <div class="story-view-title-row">
+        <span class="story-view-title" id="story-view-title">— the group chat —</span>
+        <span class="story-view-tagline" id="story-view-tagline"></span>
       </div>
+      <div class="story-chapter-progress" id="story-chapter-progress"></div>
     </div>
+    <div class="story-map-wrap">
+      <canvas id="story-map-canvas"></canvas>
+    </div>
+    <div class="story-char-detail hidden" id="story-char-detail"></div>
   </div>
 
   <!-- ═══════════════ ANALYTICS VIEW ═══════════════ -->
@@ -271,6 +355,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
-  <script type="module" src="js/main.js?v=11"></script>
+  <script type="module" src="js/main.js?v=20"></script>
 </body>
 </html>

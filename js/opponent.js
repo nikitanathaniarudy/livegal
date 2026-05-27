@@ -7,17 +7,25 @@ import { OLLAMA_URL } from './config.js';
  * extracts 4 personality signal scores (0.0–1.0 each).
  * Fire-and-forget safe — always resolves, returns null on failure.
  */
-export async function extractOpponentCues(said, model) {
+export async function extractOpponentCues(said, model, isScenario = false) {
   if (!said?.trim()) return null;
   if (said.trim().split(/\s+/).length < 5) return null; // skip one-liners
   try {
+    const scenarioNote = isScenario
+      ? `IMPORTANT: The speaker is playing a roleplay character in a social scenario game. ` +
+        `Ignore what the content is about (the story, the scenario premise, what they reveal about the plot). ` +
+        `Rate ONLY the actual communication style — the real energy, tone, and warmth they bring to how they speak. ` +
+        `A guarded character played warmly still scores high warmth.\n\n`
+      : '';
+
     const prompt =
-      `Analyse this single statement made in a real conversation.\n` +
-      `Rate it on exactly 4 dimensions from 0.0 to 1.0:\n` +
-      `- warmth: 0=cold or distant, 1=warm or friendly\n` +
-      `- humor: 0=serious or flat, 1=playful or witty\n` +
-      `- openness: 0=guarded or surface-level, 1=open or revealing\n` +
-      `- directness: 0=vague or deflecting, 1=direct or assertive\n\n` +
+      scenarioNote +
+      `Analyse the communication STYLE of this statement — HOW the person speaks, not what they're talking about.\n` +
+      `Rate on exactly 4 dimensions from 0.0 to 1.0:\n` +
+      `- warmth: 0=cold/distant/clipped tone, 1=warm/caring/friendly tone\n` +
+      `- humor: 0=flat/serious delivery, 1=playful/witty/light delivery\n` +
+      `- openness: 0=guarded phrasing/closed body language in words, 1=naturally expressive and easy manner\n` +
+      `- directness: 0=meandering/hedging/vague, 1=clear/confident/straight to the point\n\n` +
       `Statement: "${said.replace(/"/g, "'")}"\n\n` +
       `Return ONLY raw JSON, no explanation, no markdown:\n` +
       `{"warmth":0.0,"humor":0.0,"openness":0.0,"directness":0.0}`;
@@ -66,6 +74,8 @@ function parseCues(raw) {
 export function computeOpponentProfile(observations) {
   if (!observations?.length || observations.length < 5) return null;
 
+  // All observations count equally — scenarios are still real conversations.
+  // HOW someone speaks (warmth, humor, directness) is genuine regardless of topic.
   const n   = observations.length;
   const avg = { warmth: 0, humor: 0, openness: 0, directness: 0 };
 

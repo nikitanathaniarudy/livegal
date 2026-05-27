@@ -42,6 +42,18 @@ export function resetDialogue() {
   el.classList.add('empty');
 }
 
+/**
+ * Switch the nameplate between the other person and the player.
+ * @param {string} name      - Name to display
+ * @param {boolean} isPlayer - true = player speaking (applies .player-speaking style)
+ */
+export function setNameplate(name, isPlayer = false) {
+  const nameEl  = document.getElementById('session-person-name');
+  const box     = document.querySelector('.vn-dialogue-box');
+  if (nameEl) nameEl.textContent = name;
+  if (box)    box.classList.toggle('player-speaking', isPlayer);
+}
+
 // ── Error banner ─────────────────────────────────────────────────────
 
 export function showError(html) {
@@ -90,7 +102,7 @@ export function renderChoices(options, onPick) {
       const cls = RESPONSE_TYPES[i]?.cls || 'a';
       return `
         <button class="choice-btn ${cls}" data-index="${i}">
-          <div class="choice-tag">${opt.label}</div>
+          <div class="choice-tag">option ${i + 1}</div>
           <div class="choice-text">${opt.text}</div>
         </button>
       `;
@@ -353,10 +365,10 @@ export function renderDirectory(people) {
 
 // ── Session debrief ──────────────────────────────────────────────────
 
-export function showDebrief(exchanges, personName, totalAffection) {
+export function showDebrief(exchanges, personName, totalAffection, scenario = null) {
   const modal = document.getElementById('debrief-modal');
   document.getElementById('debrief-title').textContent = `— ${personName} —`;
-  document.getElementById('debrief-body').innerHTML = buildDebriefBody(exchanges, totalAffection);
+  document.getElementById('debrief-body').innerHTML = buildDebriefBody(exchanges, totalAffection, scenario);
   modal.classList.remove('hidden');
 
   document.getElementById('debrief-body').querySelectorAll('.debrief-exchange-header').forEach(hdr => {
@@ -368,6 +380,47 @@ export function showDebrief(exchanges, personName, totalAffection) {
       if (toggle) toggle.textContent = isOpen ? 'hide ↑' : 'see alternatives ↓';
     });
   });
+}
+
+/** Called async after evaluateSession resolves — fills the loading eval card. */
+export function updateDebriefEval(evalData) {
+  const section = document.getElementById('debrief-eval-section');
+  if (!section || !evalData) return;
+  const title = section.dataset.scenarioTitle || '';
+  section.innerHTML = buildEvalSection(evalData, title);
+}
+
+function buildEvalSection(evalData, scenarioTitle = '') {
+  const dims = [
+    { key: 'honesty',  label: 'Honesty',  color: '#f8c840' },
+    { key: 'empathy',  label: 'Empathy',  color: '#a78bfa' },
+    { key: 'courage',  label: 'Courage',  color: '#fb923c' },
+  ];
+
+  const barsHTML = dims.map(d => {
+    const dim = evalData[d.key] || { score: 5, note: '' };
+    const pct = Math.max(0, Math.min(10, dim.score)) * 10;
+    return `
+      <div class="debrief-eval-dim">
+        <span class="debrief-eval-dim-label">${d.label}</span>
+        <div class="debrief-eval-bar-wrap">
+          <div class="debrief-eval-bar" style="width:${pct}%;background:${d.color}"></div>
+        </div>
+        <span class="debrief-eval-score" style="color:${d.color}">${dim.score}</span>
+      </div>
+      ${dim.note ? `<div class="debrief-eval-note">${dim.note}</div>` : ''}
+    `;
+  }).join('');
+
+  const titleLine = scenarioTitle
+    ? `<div class="debrief-eval-title">scenario report · ${scenarioTitle}</div>`
+    : `<div class="debrief-eval-title">scenario report</div>`;
+
+  const overall = evalData.overall
+    ? `<div class="debrief-eval-overall">"${evalData.overall}"</div>`
+    : '';
+
+  return titleLine + barsHTML + overall;
 }
 
 function renderTimelineGraph(exchanges) {
@@ -452,7 +505,7 @@ function renderTimelineGraph(exchanges) {
   `;
 }
 
-function buildDebriefBody(exchanges, totalAffection) {
+function buildDebriefBody(exchanges, totalAffection, scenario = null) {
   const chron   = [...exchanges].reverse();
   const scored  = chron.filter(e => e.affectionDelta !== undefined);
   const best    = scored.length ? scored.reduce((b, e) => e.affectionDelta > b.affectionDelta ? e : b) : null;
@@ -547,7 +600,14 @@ function buildDebriefBody(exchanges, totalAffection) {
       </div>`;
   }).join('');
 
-  return summaryHTML + statsHTML + graphHTML + `<div class="debrief-timeline-label">— event log —</div>` + `<div class="debrief-timeline">${timelineHTML}</div>`;
+  // Scenario eval card — starts in loading state, filled by updateDebriefEval() async
+  const evalHTML = scenario ? `
+    <div id="debrief-eval-section" class="debrief-eval-section" data-scenario-title="${scenario.title}">
+      <div class="debrief-eval-title">scenario report · ${scenario.title}</div>
+      <div class="debrief-eval-loading">analyzing your performance<span class="debrief-eval-dots">…</span></div>
+    </div>` : '';
+
+  return evalHTML + summaryHTML + statsHTML + graphHTML + `<div class="debrief-timeline-label">— event log —</div>` + `<div class="debrief-timeline">${timelineHTML}</div>`;
 }
 
 // Close handlers — run once at module load
@@ -690,7 +750,7 @@ function opponentProfileCard(name, profile, obsCount) {
       <div class="opp-profile-header">
         <div class="opp-type-name">${profile.type.emoji} ${profile.type.name}</div>
         <div class="opp-confidence">
-          <span class="opp-confidence-label">${profile.count} observations · ${confidencePct}% confidence</span>
+          <span class="opp-confidence-label">${profile.count} exchanges observed · ${confidencePct}% confidence</span>
           <div class="opp-confidence-track">
             <div class="opp-confidence-fill" style="width:${confidencePct}%"></div>
           </div>
@@ -702,6 +762,9 @@ function opponentProfileCard(name, profile, obsCount) {
         ${profile.tip}
       </div>
       <div class="gpc-axes opp-axes">${axisRows}</div>
+      <div class="opp-profile-note">
+        This reflects <em>communication style</em> — how they speak, not what the scenario asked them to say.
+      </div>
     </div>`;
 }
 
@@ -1270,3 +1333,171 @@ function animateBars(data) {
     if (el.classList.contains('gpc-axis-dot'))  el.style.left  = val;
   });
 }
+
+// ── Story Map ─────────────────────────────────────────────────────────
+
+export function renderStoryMap(story, state) {
+  const canvas  = document.getElementById('story-map-canvas');
+  const titleEl = document.getElementById('story-view-title');
+  const tagEl   = document.getElementById('story-view-tagline');
+  const progEl  = document.getElementById('story-chapter-progress');
+  const detailEl = document.getElementById('story-char-detail');
+  if (!canvas || !story) return;
+
+  if (titleEl) titleEl.textContent = `— ${story.title.toLowerCase()} —`;
+  if (tagEl)   tagEl.textContent   = story.tagline || '';
+
+  // Chapter progress pills
+  if (progEl) {
+    progEl.innerHTML = story.chapters.map((ch, i) => {
+      const done    = state.completedChapters?.includes(i);
+      const current = (state.completedChapters?.length ?? 0) === i;
+      const cls     = done ? 'prog-pill done' : current ? 'prog-pill current' : 'prog-pill';
+      const charId  = ch.character;
+      const char    = charId ? story.cast.find(c => c.id === charId) : null;
+      const color   = char?.color || '#888';
+      return `<div class="${cls}" title="Chapter ${i + 1}: ${ch.title}" style="${done || current ? `border-color:${color};color:${color}` : ''}">
+        ${i + 1}
+      </div>`;
+    }).join('');
+  }
+
+  // Size canvas to its container
+  const wrap = canvas.parentElement;
+  const W = wrap.clientWidth  || 700;
+  const H = wrap.clientHeight || 420;
+  canvas.width  = W;
+  canvas.height = H;
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  const metAssigned = new Set(Object.keys(state.assignments || {}));
+
+  // Draw edges first
+  const EDGE_STYLES = {
+    broken:  { color: '#ef4444', dash: [6, 4], width: 1.5, alpha: 0.7 },
+    close:   { color: '#f8c840', dash: [],      width: 2,   alpha: 0.8 },
+    tension: { color: '#fb923c', dash: [3, 5],  width: 1.5, alpha: 0.6 },
+    dim:     { color: '#6b7280', dash: [2, 6],  width: 1,   alpha: 0.4 },
+  };
+
+  const nodePos = (c) => ({ x: c.mapX * W, y: c.mapY * H });
+
+  story.castRelationships.forEach(rel => {
+    const fromCast = story.cast.find(c => c.id === rel.from);
+    const toCast   = story.cast.find(c => c.id === rel.to);
+    if (!fromCast || !toCast) return;
+
+    const p1 = nodePos(fromCast);
+    const p2 = nodePos(toCast);
+    const st = EDGE_STYLES[rel.style] || EDGE_STYLES.dim;
+
+    ctx.save();
+    ctx.globalAlpha = st.alpha;
+    ctx.strokeStyle = st.color;
+    ctx.lineWidth   = st.width;
+    ctx.setLineDash(st.dash);
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+
+    // Edge label at midpoint
+    const mx = (p1.x + p2.x) / 2;
+    const my = (p1.y + p2.y) / 2;
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle   = st.color;
+    ctx.font        = '10px monospace';
+    ctx.textAlign   = 'center';
+    ctx.fillText(rel.label, mx, my - 6);
+    ctx.restore();
+  });
+
+  // Draw nodes
+  const NODE_R = 28;
+  story.cast.forEach(char => {
+    const { x, y } = nodePos(char);
+    const met  = metAssigned.has(char.id);
+    const done = story.chapters.some(
+      ch => ch.character === char.id && state.completedChapters?.includes(ch.index)
+    );
+
+    ctx.save();
+
+    // Glow for met characters
+    if (met) {
+      ctx.shadowColor = char.color;
+      ctx.shadowBlur  = 18;
+    }
+
+    // Circle
+    ctx.beginPath();
+    ctx.arc(x, y, NODE_R, 0, Math.PI * 2);
+    ctx.fillStyle   = met ? char.color + '22' : '#1a1626';
+    ctx.strokeStyle = met ? char.color : char.color + '55';
+    ctx.lineWidth   = met ? 2 : 1.5;
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur  = 0;
+
+    // Checkmark if chapter done
+    if (done) {
+      ctx.fillStyle = char.color;
+      ctx.font      = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('✓', x, y);
+    }
+
+    // Name label
+    ctx.globalAlpha    = met ? 1 : 0.5;
+    ctx.fillStyle      = met ? char.color : '#9ca3af';
+    ctx.font           = `${met ? 'bold ' : ''}13px sans-serif`;
+    ctx.textAlign      = 'center';
+    ctx.textBaseline   = 'top';
+    ctx.shadowColor    = '#000';
+    ctx.shadowBlur     = 6;
+    ctx.fillText(char.name, x, y + NODE_R + 6);
+
+    // Role label
+    ctx.globalAlpha  = met ? 0.6 : 0.3;
+    ctx.fillStyle    = '#9ca3af';
+    ctx.font         = '10px sans-serif';
+    ctx.shadowBlur   = 0;
+    ctx.fillText(char.role, x, y + NODE_R + 22);
+
+    ctx.restore();
+  });
+
+  // Click handler
+  canvas.onclick = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx   = e.clientX - rect.left;
+    const my   = e.clientY - rect.top;
+    const hit  = story.cast.find(c => {
+      const dx = nodePos(c).x - mx;
+      const dy = nodePos(c).y - my;
+      return Math.sqrt(dx * dx + dy * dy) < NODE_R + 8;
+    });
+    if (hit && detailEl) {
+      const met = metAssigned.has(hit.id);
+      const chapterForChar = story.chapters.find(ch => ch.character === hit.id);
+      const done = chapterForChar && state.completedChapters?.includes(chapterForChar.index);
+      detailEl.innerHTML = `
+        <div class="story-char-detail-name" style="color:${hit.color}">${hit.name}</div>
+        <div class="story-char-detail-role">${hit.role}</div>
+        <div class="story-char-detail-desc">${hit.description}</div>
+        <div class="story-char-detail-status">${
+          done ? '✓ chapter complete' :
+          met  ? '● in progress' :
+          chapterForChar ? `chapter ${chapterForChar.index + 1} — not yet met` : ''
+        }</div>
+      `;
+      detailEl.classList.remove('hidden');
+    } else if (detailEl) {
+      detailEl.classList.add('hidden');
+    }
+  };
+}
+
