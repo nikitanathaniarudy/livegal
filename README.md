@@ -60,10 +60,9 @@ Edit the model name in the top-right pill, or change the default in `js/config.j
 
 ## Goals
 ### Priority
-- [ ] Fine tune the model
-- [ ] Smarter network -> extrapolation of relationships
+- [ ] Overarching stories
+- [ ] Make UI for story like a book
 - [ ] Migration to phone
-- [ ] UI Revamp
 - [ ] Deployment
 
 ### Less Priority
