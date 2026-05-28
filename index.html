@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Gal Game ✦</title>
+  <title>Honne ✦</title>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cinzel:wght@400;600&family=Lora:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" href="assets/window_icon.png">
-  <link rel="stylesheet" href="css/style.css?v=20">
-  <script>console.log('HTML Version: [v20 - story-mode]');</script>
+  <link rel="stylesheet" href="css/style.css?v=25">
+  <script>console.log('HTML Version: [v21 - honne]');</script>
   <style>
     /* Critical fallback styles for the registration modal */
     .face-reg-backdrop {
@@ -43,8 +43,8 @@
   <!-- ══════════════════ HOMEPAGE / TITLE SCREEN ═══════════════════ -->
   <div id="homepage" class="homepage">
     <div class="homepage-content">
-      <div class="homepage-logo">Live Gal Game <span>✦</span></div>
-      <div class="homepage-tagline">a real-life visual novel experience</div>
+      <div class="homepage-logo">Honne <span>✦</span></div>
+      <div class="homepage-tagline">本音 — say what you actually mean</div>
 
       <div class="homepage-panel">
         <div class="hp-field">
@@ -66,7 +66,7 @@
 
   <!-- ── Header ──────────────────────────────────────────── -->
   <header>
-    <div class="logo">Live Gal Game <span>✦</span></div>
+    <div class="logo">Honne <span>✦</span></div>
     <nav class="nav-tabs">
       <button class="nav-tab active" data-view="conversation">Conversation</button>
       <button class="nav-tab"        data-view="directory">Directory</button>
@@ -87,6 +87,7 @@
         <div class="affection-bar-fill" id="affection-bar-fill"></div>
         <svg id="affection-spark" class="affection-spark" preserveAspectRatio="none"></svg>
       </div>
+      <button class="scene-peek-btn" id="scene-peek-btn" title="View current scene">📖 Scene</button>
       <button class="end-session-btn" id="end-session-btn">End session ✓</button>
     </div>
     <div class="model-pill">
@@ -106,7 +107,7 @@
   <div id="player-setup-modal" class="player-setup-modal hidden">
     <div class="player-setup-panel">
       <div class="player-setup-eyebrow">welcome to</div>
-      <div class="player-setup-title">Live Gal Game ✦</div>
+      <div class="player-setup-title">Honne ✦</div>
       <div class="player-setup-sub">Set up your profile to start playing.</div>
 
       <div class="setup-field">
@@ -130,6 +131,7 @@
 
   <!-- ═══════════════ SCENARIO / NARRATOR SCREEN ═══════════════ -->
   <div id="scenario-screen" class="scenario-screen hidden">
+    <button class="scenario-peek-close hidden" id="scenario-peek-close">✕</button>
     <div class="scenario-inner">
 
       <!-- Header -->
@@ -308,9 +310,14 @@
 
   <!-- ═══════════════ STORY VIEW ═══════════════ -->
   <div id="view-story" class="view-hidden">
+
+    <!-- Story selector — 5 cards, one per player count -->
+    <div class="story-selector" id="story-selector"></div>
+
+    <!-- Active story details -->
     <div class="story-view-header">
       <div class="story-view-title-row">
-        <span class="story-view-title" id="story-view-title">— the group chat —</span>
+        <span class="story-view-title" id="story-view-title"></span>
         <span class="story-view-tagline" id="story-view-tagline"></span>
       </div>
       <div class="story-chapter-progress" id="story-chapter-progress"></div>
@@ -354,7 +361,17 @@
     </div>
   </div>
 
+  <!-- ═══════════════ STORY PICK OVERLAY ═══════════════ -->
+  <div id="story-pick-overlay" class="story-pick-overlay hidden">
+    <div class="story-pick-inner">
+      <div class="story-pick-eyebrow">before you begin</div>
+      <div class="story-pick-title">choose your story</div>
+      <div class="story-pick-cards" id="story-pick-cards"></div>
+      <button class="story-pick-btn" id="story-pick-btn">Continue →</button>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
-  <script type="module" src="js/main.js?v=20"></script>
+  <script type="module" src="js/main.js?v=26"></script>
 </body>
 </html>

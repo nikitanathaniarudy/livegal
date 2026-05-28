@@ -1,5 +1,5 @@
 import { RESPONSE_TYPES, DEFAULT_MODEL, CHARACTERS, LANGUAGES } from './config.js';
-console.log('main.js loaded [v4 - story-mode]');
+console.log('main.js loaded [v5 - honne]');
 import { fetchOptions, evaluateSession } from './llm.js';
 import { SpeechInput }     from './speech.js';
 import { Camera }          from './camera.js';
@@ -23,7 +23,8 @@ import {
 import { SpriteCharacter, LABEL_TO_EXPR } from './sprite.js';
 import {
   STORIES, getStory, getNextChapter, getCharacter, fillChapter,
-  buildStoryMemory, getStoryState, saveStoryState, assignCharacter, completeChapter,
+  buildStoryMemory, getStoryState, getStoryProgress, setActiveStory,
+  assignCharacter, completeChapter,
 } from './stories.js';
 
 // ── Core objects ──────────────────────────────────────────────────────
@@ -67,7 +68,7 @@ let sessionPending    = false; // true while scenario screen is open
 
 // ── Story state ───────────────────────────────────────────────────────
 let storyState  = getStoryState();
-const activeStory = getStory(storyState.storyId);
+let activeStory = getStory(storyState.activeStoryId);
 
 // ── DOM refs ──────────────────────────────────────────────────────────
 
@@ -139,7 +140,6 @@ function initHomepage() {
   const hpChar    = document.getElementById('hp-char');
   const hpLang    = document.getElementById('hp-lang');
   const startBtn  = document.getElementById('hp-start');
-
   // Populate selects
   populateCharOptions(hpChar);
   populateLangOptions(hpLang);
@@ -375,7 +375,8 @@ function showScenarioScreen(person, autoRecognized, onBegin) {
   sessionPending = true;
 
   // Get next story chapter and record character assignment
-  const chapter   = getNextChapter(activeStory, storyState);
+  const storyProgress = getStoryProgress(storyState, activeStory.id);
+  const chapter       = getNextChapter(activeStory, storyProgress);
   if (!chapter) {
     // Story complete — fall back to idle
     sessionPending = false;
@@ -385,7 +386,7 @@ function showScenarioScreen(person, autoRecognized, onBegin) {
 
   // Link this real person to the story character for this chapter
   if (chapter.character) {
-    storyState = assignCharacter(storyState, chapter.character, person.id);
+    storyState = assignCharacter(storyState, activeStory.id, chapter.character, person.id);
   }
 
   const filledChapter = fillChapter(chapter, playerName);
@@ -424,7 +425,7 @@ function showScenarioScreen(person, autoRecognized, onBegin) {
   screen.classList.remove('hidden');
 
   // Build story-so-far prefix then typewriter the setup
-  const storyMemoryBlock = buildStoryMemory(activeStory, storyState);
+  const storyMemoryBlock = buildStoryMemory(activeStory, storyProgress);
   const fullText = chapter.setup;
   let i = 0;
   const SPEED = 22;
@@ -451,6 +452,53 @@ function showScenarioScreen(person, autoRecognized, onBegin) {
     onBegin(storyMemoryBlock);
   };
 }
+
+// ── Scene peek ────────────────────────────────────────────────────────
+
+function peekScenario() {
+  if (!activeScenario) return;
+
+  const screen       = document.getElementById('scenario-screen');
+  const eyebrowEl    = document.getElementById('scenario-eyebrow');
+  const titleEl      = document.getElementById('scenario-title');
+  const charLabelEl  = document.getElementById('scenario-char-label');
+  const textEl       = document.getElementById('scenario-text');
+  const rolesEl      = document.getElementById('scenario-roles');
+  const playerRoleEl = document.getElementById('scenario-role-player');
+  const friendRoleEl = document.getElementById('scenario-role-friend');
+  const beginBtn     = document.getElementById('scenario-begin-btn');
+  const closeBtn     = document.getElementById('scenario-peek-close');
+
+  // Repopulate from activeScenario (already filled, no typewriter needed)
+  const castMember  = activeScenario.character ? getCharacter(activeStory, activeScenario.character) : null;
+  const chapterNum  = (activeScenario.chapterIndex ?? 0) + 1;
+  if (eyebrowEl)   eyebrowEl.textContent   = `chapter ${chapterNum} of ${activeStory.chapters.length}`;
+  titleEl.textContent      = activeScenario.title;
+  if (charLabelEl) charLabelEl.textContent = castMember ? `— ${castMember.name} —` : '';
+  textEl.textContent       = activeScenario.setup;
+  playerRoleEl.textContent = activeScenario.playerRole;
+  friendRoleEl.textContent = activeScenario.friendRole;
+  rolesEl.classList.remove('hidden');
+
+  beginBtn.classList.add('hidden');
+  if (closeBtn) closeBtn.classList.remove('hidden');
+
+  screen.classList.add('peek-mode');
+  screen.classList.remove('hidden');
+}
+
+function closePeek() {
+  const screen   = document.getElementById('scenario-screen');
+  const beginBtn = document.getElementById('scenario-begin-btn');
+  const closeBtn = document.getElementById('scenario-peek-close');
+  screen.classList.add('hidden');
+  screen.classList.remove('peek-mode');
+  beginBtn.classList.remove('hidden');
+  if (closeBtn) closeBtn.classList.add('hidden');
+}
+
+document.getElementById('scene-peek-btn')?.addEventListener('click', peekScenario);
+document.getElementById('scenario-peek-close')?.addEventListener('click', closePeek);
 
 async function startSession(person, autoRecognized = false) {
   showScenarioScreen(person, autoRecognized, async (storyMemory) => {
@@ -494,6 +542,17 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
 
+    // Close scenario peek when switching away — it belongs to the conversation context
+    const scenarioScreen = document.getElementById('scenario-screen');
+    if (scenarioScreen && !scenarioScreen.classList.contains('hidden')) {
+      if (scenarioScreen.classList.contains('peek-mode')) {
+        closePeek();
+      } else if (tab.dataset.view !== 'conversation') {
+        // Initial scenario screen showing — hide it when user navigates away
+        scenarioScreen.classList.add('hidden');
+      }
+    }
+
     const view = tab.dataset.view;
     document.getElementById('view-conversation').classList.toggle('view-hidden', view !== 'conversation');
     document.getElementById('view-directory').classList.toggle('view-hidden', view !== 'directory');
@@ -527,7 +586,12 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
     }
 
     if (view === 'story') {
-      renderStoryMap(activeStory, storyState);
+      const switchStory = (newStoryId) => {
+        storyState  = setActiveStory(storyState, newStoryId);
+        activeStory = getStory(newStoryId);
+        renderStoryMap(STORIES, storyState, switchStory);
+      };
+      renderStoryMap(STORIES, storyState, switchStory);
     }
   });
 });
@@ -705,34 +769,34 @@ async function endCurrentSession(showModal = true) {
     console.error('Failed to refresh people list:', err);
   }
 
+  // A chapter requires at least this many exchanges to count as completed.
+  // Below this, the session is saved but the story doesn't advance.
+  const MIN_EXCHANGES = 5;
+
   if (showModal && sessionExchanges.length > 0) {
-    // Show debrief immediately — eval section starts in "analyzing…" state
-    showDebrief(sessionExchanges, sessionPersonName, sessionAffection, sessionScenario);
+    const chapterPassed = sessionScenario && sessionExchanges.length >= MIN_EXCHANGES;
 
-    // Run scenario eval + story event recording in background
-    if (sessionScenario) {
+    // Show debrief — eval section state depends on whether chapter passed
+    showDebrief(sessionExchanges, sessionPersonName, sessionAffection, sessionScenario, chapterPassed);
+
+    if (chapterPassed) {
+      // Enough engagement — evaluate and complete the chapter
       const scenarioCtx = `${sessionScenario.llmContext}\nPlayer role: ${sessionScenario.playerRole}`;
-
-      if (sessionExchanges.length >= 3) {
-        evaluateSession(sessionExchanges, scenarioCtx, DEFAULT_MODEL)
-          .then(evalResult => {
-            if (evalResult) updateDebriefEval(evalResult);
-
-            // Record story event summary from the eval
-            if (evalResult?.overall && sessionScenario.chapterIndex != null) {
-              storyState = completeChapter(
-                storyState,
-                sessionScenario.chapterIndex,
-                evalResult.overall,
-              );
-            }
-          })
-          .catch(err => console.warn('Scenario eval failed:', err));
-      } else if (sessionScenario.chapterIndex != null) {
-        // Short session — complete chapter without summary
-        storyState = completeChapter(storyState, sessionScenario.chapterIndex, '');
-      }
+      evaluateSession(sessionExchanges, scenarioCtx, DEFAULT_MODEL)
+        .then(evalResult => {
+          if (evalResult) updateDebriefEval(evalResult);
+          if (evalResult?.overall && sessionScenario.chapterIndex != null) {
+            storyState = completeChapter(
+              storyState,
+              activeStory.id,
+              sessionScenario.chapterIndex,
+              evalResult.overall,
+            );
+          }
+        })
+        .catch(err => console.warn('Scenario eval failed:', err));
     }
+    // If chapter not passed: story state unchanged — same chapter replays next session
   } else if (showModal) {
     setHint(`Session with ${sessionPersonName} ended.`);
   }
@@ -761,6 +825,66 @@ async function enumerateCameras() {
     cameraSelect.value = prev;
   }
   cameraSelectRow.classList.toggle('hidden', cameras.length === 0);
+}
+
+// ── Story picker overlay ──────────────────────────────────────────────
+
+function showStoryPicker(onConfirm) {
+  const overlay   = document.getElementById('story-pick-overlay');
+  const cardsEl   = document.getElementById('story-pick-cards');
+  const confirmBtn = document.getElementById('story-pick-btn');
+  if (!overlay) { onConfirm(); return; }
+
+  const render = () => {
+    cardsEl.innerHTML = STORIES.map(s => {
+      const active = s.id === storyState.activeStoryId;
+      const color  = s.cast[0]?.color ?? '#a78bfa';
+      const label  = s.players === 1 ? '1 person' : `${s.players} people`;
+      const dots   = s.cast.map(c =>
+        `<span class="story-card-dot" style="background:${c.color}"></span>`
+      ).join('');
+      const sp     = getStoryProgress(storyState, s.id);
+      const done   = sp.completedChapters?.length ?? 0;
+      const total  = s.chapters.length;
+      const pct    = total ? Math.round((done / total) * 100) : 0;
+      return `<button
+        class="story-card${active ? ' active' : ''}"
+        data-sid="${s.id}"
+        style="--card-color:${color}"
+      >
+        <div class="story-card-body">
+          <span class="story-card-count">${label}</span>
+          <span class="story-card-title">${s.title}</span>
+          <span class="story-card-tagline">${s.tagline}</span>
+          <div class="story-card-cast">${dots}</div>
+          <div class="story-card-bar">
+            <div class="story-card-bar-fill" style="width:${pct}%;background:${color}"></div>
+          </div>
+          <span class="story-card-chapters">${done} / ${total} chapters</span>
+        </div>
+      </button>`;
+    }).join('');
+
+    cardsEl.querySelectorAll('[data-sid]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        storyState  = setActiveStory(storyState, btn.dataset.sid);
+        activeStory = getStory(btn.dataset.sid);
+        render();
+      });
+    });
+  };
+
+  render();
+  overlay.classList.remove('hidden');
+
+  confirmBtn.onclick = () => {
+    overlay.classList.add('fading');
+    setTimeout(() => {
+      overlay.classList.add('hidden');
+      overlay.classList.remove('fading');
+      onConfirm();
+    }, 350);
+  };
 }
 
 cameraStartBtn.addEventListener('click', async () => {
@@ -802,16 +926,17 @@ cameraStartBtn.addEventListener('click', async () => {
     await camera.start(cameraFeed, deviceId);
     hideCameraOverlay();
     resetToIdleState();
-    
+
     // Auto-mode: hide the manual person selector once camera is active
     const sel = document.getElementById('person-selector');
     sel.classList.add('hidden');
     sel.style.display = 'none';
-    
-    setHint('Scanning for faces…', true);
 
-    await loadModels();
-    recognitionLoop();
+    showStoryPicker(async () => {
+      setHint('Scanning for faces…', true);
+      await loadModels();
+      recognitionLoop();
+    });
   } catch (err) {
     cameraStartBtn.disabled = false;
     setCameraOverlayHint('Could not start camera: ' + err.message);
@@ -827,7 +952,9 @@ cameraRefreshBtn.addEventListener('click', async () => {
 
 cameraManualBtn.addEventListener('click', () => {
   hideCameraOverlay();
-  showPersonSelector();
+  showStoryPicker(() => {
+    showPersonSelector();
+  });
 });
 
 async function loadModels() {

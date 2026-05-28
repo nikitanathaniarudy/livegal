@@ -12,7 +12,7 @@ export const RESPONSE_TYPES = [
   { label: 'Cold',      cls: 'd' },
 ];
 
-// Anime character persona presets
+// Anime persona presets — controls the AI's response style
 export const CHARACTERS = {
   default: {
     name: 'Default',

@@ -1,5 +1,6 @@
 import { RESPONSE_TYPES }         from './config.js';
 import { computeOpponentProfile } from './opponent.js';
+import { getStoryProgress }       from './stories.js';
 
 const CLOSENESS_TIERS = [
   { max: 15,  label: 'Stranger',     color: '#4a4560' },
@@ -365,10 +366,10 @@ export function renderDirectory(people) {
 
 // ── Session debrief ──────────────────────────────────────────────────
 
-export function showDebrief(exchanges, personName, totalAffection, scenario = null) {
+export function showDebrief(exchanges, personName, totalAffection, scenario = null, chapterPassed = false) {
   const modal = document.getElementById('debrief-modal');
   document.getElementById('debrief-title').textContent = `— ${personName} —`;
-  document.getElementById('debrief-body').innerHTML = buildDebriefBody(exchanges, totalAffection, scenario);
+  document.getElementById('debrief-body').innerHTML = buildDebriefBody(exchanges, totalAffection, scenario, chapterPassed);
   modal.classList.remove('hidden');
 
   document.getElementById('debrief-body').querySelectorAll('.debrief-exchange-header').forEach(hdr => {
@@ -505,7 +506,7 @@ function renderTimelineGraph(exchanges) {
   `;
 }
 
-function buildDebriefBody(exchanges, totalAffection, scenario = null) {
+function buildDebriefBody(exchanges, totalAffection, scenario = null, chapterPassed = false) {
   const chron   = [...exchanges].reverse();
   const scored  = chron.filter(e => e.affectionDelta !== undefined);
   const best    = scored.length ? scored.reduce((b, e) => e.affectionDelta > b.affectionDelta ? e : b) : null;
@@ -600,12 +601,27 @@ function buildDebriefBody(exchanges, totalAffection, scenario = null) {
       </div>`;
   }).join('');
 
-  // Scenario eval card — starts in loading state, filled by updateDebriefEval() async
-  const evalHTML = scenario ? `
-    <div id="debrief-eval-section" class="debrief-eval-section" data-scenario-title="${scenario.title}">
-      <div class="debrief-eval-title">scenario report · ${scenario.title}</div>
-      <div class="debrief-eval-loading">analyzing your performance<span class="debrief-eval-dots">…</span></div>
-    </div>` : '';
+  // Scenario eval card — state depends on whether chapter was passed
+  const evalHTML = scenario ? (() => {
+    if (!chapterPassed) {
+      const needed = 5;
+      const have   = exchanges.length;
+      return `
+        <div id="debrief-eval-section" class="debrief-eval-section debrief-eval-incomplete">
+          <div class="debrief-eval-title">chapter not completed · ${scenario.title}</div>
+          <div class="debrief-eval-incomplete-msg">
+            <span class="debrief-eval-incomplete-icon">○</span>
+            You had <strong>${have}</strong> exchange${have !== 1 ? 's' : ''} — need at least <strong>${needed}</strong> to pass this chapter.
+            <br>The story won't advance yet. Come back and go deeper with this scene.
+          </div>
+        </div>`;
+    }
+    return `
+      <div id="debrief-eval-section" class="debrief-eval-section" data-scenario-title="${scenario.title}">
+        <div class="debrief-eval-title">scenario report · ${scenario.title}</div>
+        <div class="debrief-eval-loading">analyzing your performance<span class="debrief-eval-dots">…</span></div>
+      </div>`;
+  })() : '';
 
   return evalHTML + summaryHTML + statsHTML + graphHTML + `<div class="debrief-timeline-label">— event log —</div>` + `<div class="debrief-timeline">${timelineHTML}</div>`;
 }
@@ -1336,25 +1352,72 @@ function animateBars(data) {
 
 // ── Story Map ─────────────────────────────────────────────────────────
 
-export function renderStoryMap(story, state) {
-  const canvas  = document.getElementById('story-map-canvas');
-  const titleEl = document.getElementById('story-view-title');
-  const tagEl   = document.getElementById('story-view-tagline');
-  const progEl  = document.getElementById('story-chapter-progress');
-  const detailEl = document.getElementById('story-char-detail');
-  if (!canvas || !story) return;
+export function renderStoryMap(stories, fullState, onStorySelect) {
+  const story    = stories.find(s => s.id === fullState.activeStoryId) ?? stories[0];
+  const progress = getStoryProgress(fullState, story.id);
 
+  const canvas   = document.getElementById('story-map-canvas');
+  const titleEl  = document.getElementById('story-view-title');
+  const tagEl    = document.getElementById('story-view-tagline');
+  const progEl   = document.getElementById('story-chapter-progress');
+  const detailEl = document.getElementById('story-char-detail');
+  const selectorEl = document.getElementById('story-selector');
+  if (!canvas) return;
+
+  // ── Progress tracker rows (Story tab — compact, not selection cards) ──
+  if (selectorEl) {
+    selectorEl.innerHTML = stories.map(s => {
+      const sp     = getStoryProgress(fullState, s.id);
+      const done   = sp.completedChapters?.length ?? 0;
+      const total  = s.chapters.length;
+      const pct    = total ? Math.round((done / total) * 100) : 0;
+      const active = s.id === story.id;
+      const color  = s.cast[0]?.color ?? '#a78bfa';
+      const label  = s.players === 1 ? '1p' : `${s.players}p`;
+
+      // Chapter dots — filled if complete, current if next, empty otherwise
+      const chDots = s.chapters.map((ch, i) => {
+        const isDone    = sp.completedChapters?.includes(i);
+        const isCurrent = (sp.completedChapters?.length ?? 0) === i;
+        const char      = ch.character ? s.cast.find(c => c.id === ch.character) : null;
+        const dotColor  = char?.color ?? color;
+        return `<span class="prog-row-dot ${isDone ? 'done' : isCurrent ? 'current' : ''}"
+          style="${isDone || isCurrent ? `background:${dotColor};box-shadow:0 0 6px ${dotColor}66` : ''}"></span>`;
+      }).join('');
+
+      return `<button
+        class="prog-row${active ? ' active' : ''}"
+        data-story-id="${s.id}"
+        style="--row-color:${color}"
+      >
+        <span class="prog-row-badge">${label}</span>
+        <div class="prog-row-mid">
+          <span class="prog-row-title">${s.title}</span>
+          <div class="prog-row-dots">${chDots}</div>
+        </div>
+        <span class="prog-row-pct">${pct}%</span>
+      </button>`;
+    }).join('');
+
+    selectorEl.querySelectorAll('[data-story-id]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.storyId;
+        if (onStorySelect) onStorySelect(id);
+      });
+    });
+  }
+
+  // ── Active story header ─────────────────────────────────────────
   if (titleEl) titleEl.textContent = `— ${story.title.toLowerCase()} —`;
   if (tagEl)   tagEl.textContent   = story.tagline || '';
 
   // Chapter progress pills
   if (progEl) {
     progEl.innerHTML = story.chapters.map((ch, i) => {
-      const done    = state.completedChapters?.includes(i);
-      const current = (state.completedChapters?.length ?? 0) === i;
+      const done    = progress.completedChapters?.includes(i);
+      const current = (progress.completedChapters?.length ?? 0) === i;
       const cls     = done ? 'prog-pill done' : current ? 'prog-pill current' : 'prog-pill';
-      const charId  = ch.character;
-      const char    = charId ? story.cast.find(c => c.id === charId) : null;
+      const char    = ch.character ? story.cast.find(c => c.id === ch.character) : null;
       const color   = char?.color || '#888';
       return `<div class="${cls}" title="Chapter ${i + 1}: ${ch.title}" style="${done || current ? `border-color:${color};color:${color}` : ''}">
         ${i + 1}
@@ -1362,24 +1425,23 @@ export function renderStoryMap(story, state) {
     }).join('');
   }
 
-  // Size canvas to its container
+  // ── Canvas map ──────────────────────────────────────────────────
   const wrap = canvas.parentElement;
   const W = wrap.clientWidth  || 700;
-  const H = wrap.clientHeight || 420;
+  const H = wrap.clientHeight || 380;
   canvas.width  = W;
   canvas.height = H;
 
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, W, H);
 
-  const metAssigned = new Set(Object.keys(state.assignments || {}));
+  const metAssigned = new Set(Object.keys(progress.assignments || {}));
 
-  // Draw edges first
   const EDGE_STYLES = {
-    broken:  { color: '#ef4444', dash: [6, 4], width: 1.5, alpha: 0.7 },
-    close:   { color: '#f8c840', dash: [],      width: 2,   alpha: 0.8 },
-    tension: { color: '#fb923c', dash: [3, 5],  width: 1.5, alpha: 0.6 },
-    dim:     { color: '#6b7280', dash: [2, 6],  width: 1,   alpha: 0.4 },
+    broken:  { color: '#ef4444', dash: [6, 4], width: 1.5, alpha: 0.75 },
+    close:   { color: '#f8c840', dash: [],      width: 2,   alpha: 0.85 },
+    tension: { color: '#fb923c', dash: [3, 5],  width: 1.5, alpha: 0.65 },
+    dim:     { color: '#9ca3af', dash: [3, 7],  width: 1,   alpha: 0.55 },
   };
 
   const nodePos = (c) => ({ x: c.mapX * W, y: c.mapY * H });
@@ -1402,75 +1464,60 @@ export function renderStoryMap(story, state) {
     ctx.moveTo(p1.x, p1.y);
     ctx.lineTo(p2.x, p2.y);
     ctx.stroke();
-
-    // Edge label at midpoint
-    const mx = (p1.x + p2.x) / 2;
-    const my = (p1.y + p2.y) / 2;
-    ctx.globalAlpha = 0.6;
-    ctx.fillStyle   = st.color;
-    ctx.font        = '10px monospace';
-    ctx.textAlign   = 'center';
-    ctx.fillText(rel.label, mx, my - 6);
     ctx.restore();
   });
 
-  // Draw nodes
-  const NODE_R = 28;
+  const NODE_R = 32;
   story.cast.forEach(char => {
     const { x, y } = nodePos(char);
     const met  = metAssigned.has(char.id);
     const done = story.chapters.some(
-      ch => ch.character === char.id && state.completedChapters?.includes(ch.index)
+      ch => ch.character === char.id && progress.completedChapters?.includes(ch.index)
     );
 
     ctx.save();
 
     // Glow for met characters
-    if (met) {
-      ctx.shadowColor = char.color;
-      ctx.shadowBlur  = 18;
-    }
+    if (met) { ctx.shadowColor = char.color; ctx.shadowBlur = 20; }
 
-    // Circle
+    // Circle fill + border
     ctx.beginPath();
     ctx.arc(x, y, NODE_R, 0, Math.PI * 2);
-    ctx.fillStyle   = met ? char.color + '22' : '#1a1626';
-    ctx.strokeStyle = met ? char.color : char.color + '55';
-    ctx.lineWidth   = met ? 2 : 1.5;
+    ctx.fillStyle   = met ? char.color + '30' : char.color + '12';
+    ctx.strokeStyle = met ? char.color : char.color + '60';
+    ctx.lineWidth   = met ? 2.5 : 1.5;
     ctx.fill();
     ctx.stroke();
-    ctx.shadowBlur  = 0;
+    ctx.shadowBlur = 0;
 
-    // Checkmark if chapter done
+    // Name inside the circle
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+
     if (done) {
-      ctx.fillStyle = char.color;
-      ctx.font      = 'bold 14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('✓', x, y);
+      // Completed: name on top line, ✓ below
+      ctx.shadowColor = '#000';
+      ctx.shadowBlur  = 4;
+      ctx.font        = `bold 10px sans-serif`;
+      ctx.fillStyle   = char.color;
+      ctx.globalAlpha = 1;
+      ctx.fillText(char.name, x, y - 6);
+      ctx.font        = 'bold 13px sans-serif';
+      ctx.fillText('✓', x, y + 8);
+    } else {
+      // Not done: just name centered, dimmer if not yet met
+      ctx.shadowColor = '#000';
+      ctx.shadowBlur  = 5;
+      ctx.font        = `${met ? 'bold ' : ''}11px sans-serif`;
+      ctx.fillStyle   = met ? char.color : '#c4c4cc';
+      ctx.globalAlpha = met ? 1 : 0.65;
+      ctx.fillText(char.name, x, y);
     }
-
-    // Name label
-    ctx.globalAlpha    = met ? 1 : 0.5;
-    ctx.fillStyle      = met ? char.color : '#9ca3af';
-    ctx.font           = `${met ? 'bold ' : ''}13px sans-serif`;
-    ctx.textAlign      = 'center';
-    ctx.textBaseline   = 'top';
-    ctx.shadowColor    = '#000';
-    ctx.shadowBlur     = 6;
-    ctx.fillText(char.name, x, y + NODE_R + 6);
-
-    // Role label
-    ctx.globalAlpha  = met ? 0.6 : 0.3;
-    ctx.fillStyle    = '#9ca3af';
-    ctx.font         = '10px sans-serif';
-    ctx.shadowBlur   = 0;
-    ctx.fillText(char.role, x, y + NODE_R + 22);
 
     ctx.restore();
   });
 
-  // Click handler
+  // Click to inspect a node
   canvas.onclick = (e) => {
     const rect = canvas.getBoundingClientRect();
     const mx   = e.clientX - rect.left;
@@ -1483,7 +1530,7 @@ export function renderStoryMap(story, state) {
     if (hit && detailEl) {
       const met = metAssigned.has(hit.id);
       const chapterForChar = story.chapters.find(ch => ch.character === hit.id);
-      const done = chapterForChar && state.completedChapters?.includes(chapterForChar.index);
+      const done = chapterForChar && progress.completedChapters?.includes(chapterForChar.index);
       detailEl.innerHTML = `
         <div class="story-char-detail-name" style="color:${hit.color}">${hit.name}</div>
         <div class="story-char-detail-role">${hit.role}</div>

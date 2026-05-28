@@ -177,6 +177,85 @@ body::before {
   text-transform: uppercase;
 }
 
+/* ── Story pick overlay (shown after camera starts) ──────────── */
+.story-pick-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: rgba(6, 4, 14, 0.92);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  transition: opacity 0.35s ease;
+}
+.story-pick-overlay.hidden {
+  display: none;
+}
+.story-pick-overlay.fading {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.story-pick-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 48px 32px;
+  width: 100%;
+  max-width: 1160px;
+}
+
+.story-pick-eyebrow {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.story-pick-title {
+  font-family: 'Cinzel Decorative', serif;
+  font-size: 22px;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 40px rgba(200,160,80,0.3);
+  margin-bottom: 8px;
+}
+
+.story-pick-cards {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  flex-wrap: nowrap;
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 8px 0 16px;
+}
+.story-pick-cards::-webkit-scrollbar { display: none; }
+
+
+.story-pick-btn {
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  background: transparent;
+  border: 1.5px solid var(--accent);
+  border-radius: 6px;
+  padding: 10px 36px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  margin-top: 4px;
+}
+.story-pick-btn:hover {
+  background: var(--accent);
+  color: #0d0b18;
+}
+
 #hp-name,
 .hp-select {
   background: rgba(16,11,8,0.72);
@@ -233,7 +312,7 @@ body::before {
   top: 49px;
   z-index: 500;
   display: flex;
-  align-items: center;
+  align-items: flex-start;   /* was: center — flex centering blocks scroll-to-top */
   justify-content: center;
   overflow-y: auto;
   background:
@@ -250,7 +329,7 @@ body::before {
 
 .scenario-inner {
   width: min(820px, 92vw);
-  padding: 48px 0 60px;
+  padding: 60px 0 80px;  /* top padding creates visual centering; bottom gives scroll breathing room */
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -1709,6 +1788,61 @@ header {
   box-shadow: 0 0 12px rgba(212,130,70,0.2);
 }
 
+.scene-peek-btn {
+  background: transparent;
+  border: 1px solid rgba(167,139,250,0.35);
+  border-radius: 2px;
+  color: #a78bfa;
+  font-family: 'Cinzel', serif;
+  font-size: 8px;
+  padding: 5px 12px;
+  cursor: pointer;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.scene-peek-btn:hover {
+  background: rgba(167,139,250,0.1);
+  opacity: 1;
+  box-shadow: 0 0 10px rgba(167,139,250,0.2);
+}
+
+/* Peek close button — top-right of scenario screen */
+.scenario-peek-close {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--ink-dim);
+  font-size: 14px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  transition: all 0.2s;
+}
+
+.scenario-peek-close:hover {
+  color: var(--ink);
+  border-color: var(--ink-dim);
+}
+
+.scenario-peek-close.hidden { display: none; }
+
+/* In peek mode, dim the begin button area away */
+.scenario-screen.peek-mode .scenario-begin-btn {
+  display: none;
+}
+
 /* ── View switching ──────────────────────────────────────── */
 
 .view-hidden { display: none; }
@@ -1716,9 +1850,11 @@ header {
 #view-directory,
 #view-history,
 #view-analytics,
+#view-story,
 #view-network {
   padding-top: 49px; /* below fixed header */
   min-height: 100vh;
+  overflow-y: auto;
   position: relative;
   z-index: 1;
 }
@@ -2575,11 +2711,222 @@ header {
 
 /* ── Story view ──────────────────────────────────────────── */
 
+/* ── Story tab: progress tracker rows ───────────────────────── */
+.story-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 24px 32px 0;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+/* One row per story */
+.prog-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  text-align: left;
+  outline: none;
+}
+.prog-row:hover {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.15);
+}
+.prog-row.active {
+  background: rgba(255,255,255,0.05);
+  border-color: var(--row-color, #a78bfa);
+  box-shadow: inset 3px 0 0 var(--row-color, #a78bfa);
+}
+
+/* Player count badge */
+.prog-row-badge {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: var(--row-color, #a78bfa);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  flex-shrink: 0;
+  width: 22px;
+  opacity: 0.8;
+}
+
+/* Middle: title + chapter dots */
+.prog-row-mid {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.prog-row-title {
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+.prog-row-dots {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.prog-row-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.15);
+  flex-shrink: 0;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.prog-row-dot.done {
+  border-color: transparent;
+}
+.prog-row-dot.current {
+  border-color: transparent;
+  animation: pulse-dot 1.8s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* Percentage */
+.prog-row-pct {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-dim);
+  flex-shrink: 0;
+  width: 30px;
+  text-align: right;
+}
+.prog-row.active .prog-row-pct {
+  color: var(--row-color, #a78bfa);
+}
+
+/* ── Netflix/Xbox cards — used ONLY in the story picker overlay ── */
+.story-card {
+  flex: 0 0 180px;
+  height: 260px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  position: relative;
+  overflow: hidden;
+  background: #0f0d18;
+  transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+  text-align: left;
+  outline: none;
+}
+.story-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 40% 0%, var(--card-color, #a78bfa) 0%, transparent 65%),
+              radial-gradient(ellipse at 80% 100%, var(--card-color, #a78bfa) 0%, transparent 55%);
+  opacity: 0.13;
+  transition: opacity 0.22s ease;
+}
+.story-card:hover {
+  transform: translateY(-6px) scale(1.02);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.6), 0 0 0 1px var(--card-color, #a78bfa);
+}
+.story-card:hover::before { opacity: 0.22; }
+.story-card.active {
+  border-color: var(--card-color, #a78bfa);
+  box-shadow: 0 0 0 1px var(--card-color, #a78bfa),
+              0 0 40px -8px var(--card-color, #a78bfa),
+              0 16px 40px rgba(0,0,0,0.6);
+  transform: translateY(-4px);
+}
+.story-card.active::before { opacity: 0.26; }
+.story-card-body {
+  position: relative;
+  z-index: 1;
+  padding: 16px;
+  background: linear-gradient(to top, rgba(8,6,16,0.96) 60%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.story-card-count {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: var(--card-color, #a78bfa);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  opacity: 0.85;
+}
+.story-card-title {
+  font-family: 'Cinzel', serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.25;
+  margin: 2px 0 4px;
+}
+.story-card-tagline {
+  font-family: 'Lora', serif;
+  font-size: 10px;
+  font-style: italic;
+  color: rgba(255,255,255,0.45);
+  line-height: 1.4;
+}
+.story-card-cast {
+  display: flex;
+  gap: 5px;
+  margin: 6px 0 2px;
+}
+.story-card-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  opacity: 0.7;
+}
+.story-card-bar {
+  width: 100%;
+  height: 2px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+.story-card-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease;
+  opacity: 0.85;
+}
+.story-card-chapters {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: rgba(255,255,255,0.3);
+  margin-top: 3px;
+  letter-spacing: 0.05em;
+}
+
+/* ── Active story header ─────────────────────────────────────── */
 .story-view-header {
   width: 100%;
   max-width: 900px;
   margin: 0 auto;
-  padding: 24px 32px 12px;
+  padding: 16px 32px 12px;
 }
 
 .story-view-title-row {
@@ -2640,7 +2987,7 @@ header {
   max-width: 900px;
   margin: 0 auto;
   padding: 0 24px;
-  height: 420px;
+  height: 380px;
 }
 
 .story-map-wrap canvas {
@@ -3019,6 +3366,35 @@ header {
   text-align: center;
   padding: 10px 0 4px;
   letter-spacing: 0.02em;
+}
+
+.debrief-eval-incomplete {
+  background: rgba(107, 114, 128, 0.06);
+  border-color: rgba(107, 114, 128, 0.2);
+}
+
+.debrief-eval-incomplete .debrief-eval-title {
+  color: var(--ink-dim);
+  opacity: 0.6;
+}
+
+.debrief-eval-incomplete-msg {
+  font-size: 13px;
+  color: var(--ink-dim);
+  line-height: 1.7;
+  padding: 8px 0 4px;
+}
+
+.debrief-eval-incomplete-msg strong {
+  color: var(--ink);
+}
+
+.debrief-eval-incomplete-icon {
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 16px;
+  vertical-align: middle;
+  opacity: 0.5;
 }
 
 @keyframes debrief-dots {

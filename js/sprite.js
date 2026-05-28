@@ -1,4 +1,5 @@
-// ── Expression → filename mapping ────────────────────────────────────
+// ── Vampire girl sprite ────────────────────────────────────────────────
+
 const FILES = {
   neutral:  'vampire_girl_neutral',
   blushing: 'vampire_girl_blushing',
@@ -55,10 +56,9 @@ export class SpriteCharacter {
         // Only remove black backgrounds when the image isn't already transparent
         const id      = ctx.getImageData(0, 0, off.width, off.height);
         const d       = id.data;
-        const cornerA = d[3]; // alpha at top-left pixel
+        const cornerA = d[3];
 
         if (cornerA > 10) {
-          // Opaque background — remove dark pixels
           for (let i = 0; i < d.length; i += 4) {
             const brightness = (d[i] + d[i + 1] + d[i + 2]) / 3;
             if (brightness < 14)       d[i + 3] = 0;
@@ -66,7 +66,6 @@ export class SpriteCharacter {
           }
           ctx.putImageData(id, 0, 0);
         }
-        // If already transparent (cornerA === 0) → use as-is, no removal needed
 
         this._cache[expr] = off;
         resolve();
@@ -84,6 +83,7 @@ export class SpriteCharacter {
     this.canvas.style.opacity = '0';
     setTimeout(() => {
       const src = this._cache[expr];
+      if (!src) return;
       this.canvas.width  = src.width;
       this.canvas.height = src.height;
       this.ctx.clearRect(0, 0, src.width, src.height);
