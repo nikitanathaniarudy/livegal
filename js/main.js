@@ -1,6 +1,6 @@
-import { RESPONSE_TYPES, DEFAULT_MODEL } from './config.js';
-console.log('main.js loaded [v3 - registration-root]');
-import { fetchOptions }    from './llm.js';
+import { RESPONSE_TYPES, DEFAULT_MODEL, CHARACTERS, LANGUAGES } from './config.js';
+console.log('main.js loaded [v5 - honne]');
+import { fetchOptions, evaluateSession } from './llm.js';
 import { SpeechInput }     from './speech.js';
 import { Camera }          from './camera.js';
 import { AffectionTracker, EXPRESSION_EMOJI } from './affection.js';
@@ -8,19 +8,24 @@ import { RecognitionTracker } from './recognition.js';
 import { GalGameDB }           from './db.js';
 import { computeAnalytics }    from './analytics.js';
 import { ConversationRAG }     from './rag.js';
-import { extractRelationships } from './extractor.js';
 import { extractOpponentCues }  from './opponent.js';
-import { RelationshipGraph }   from './graph.js';
 import {
-  setStatus, setDialogue, resetDialogue,
+  setStatus, setDialogue, resetDialogue, setNameplate,
   showError, clearError, setHint,
   showShimmer, showEmptyChoices, renderChoices, renderHistory,
   updateAffectionMeter, showScorePopup,
   setCameraOverlayHint, hideCameraOverlay, setCameraAnalyzing,
   populatePersonSelect, showSessionBar, showPersonSelector, resetToIdleState,
   renderDirectory, renderPersonDetail, renderAnalytics,
-  showDebrief, renderGlobalHistory, renderGlobalHistoryGraph,
+  showDebrief, updateDebriefEval, renderGlobalHistory, renderGlobalHistoryGraph,
+  renderStoryMap,
 } from './ui.js';
+import { SpriteCharacter, LABEL_TO_EXPR } from './sprite.js';
+import {
+  STORIES, getStory, getNextChapter, getCharacter, fillChapter,
+  buildStoryMemory, getStoryState, getStoryProgress, setActiveStory,
+  assignCharacter, completeChapter,
+} from './stories.js';
 
 // ── Core objects ──────────────────────────────────────────────────────
 
@@ -29,11 +34,20 @@ const camera      = new Camera();
 const affection   = new AffectionTracker();
 const recognition = new RecognitionTracker();
 const rag         = new ConversationRAG();
-let   graph       = null;   // lazy-init when Network tab first opens
+
+// ── Character sprite ──────────────────────────────────────────────────
+const sprite = new SpriteCharacter(document.getElementById('sprite-canvas'));
+sprite.load();
+
 
 // ── Player identity ───────────────────────────────────────────────────
 
 let playerName = localStorage.getItem('playerName') || '';
+
+// ── Character & language ──────────────────────────────────────────────
+
+let activeCharacter = localStorage.getItem('characterKey') || 'default';
+let activeLanguage  = localStorage.getItem('language') || '';
 
 function setPlayerName(name) {
   playerName = name.trim();
@@ -43,11 +57,18 @@ function setPlayerName(name) {
 
 // ── Session state ─────────────────────────────────────────────────────
 
-let history        = [];
-let currentPerson  = null;
-let sessionStart   = null;
-let isRecognizing  = false;
-let pendingOptions = []; // all 4 choices from the most recent generate()
+let history           = [];
+let currentPerson     = null;
+let sessionStart      = null;
+let isRecognizing     = false;
+let pendingOptions    = [];
+let activeScenario    = null;
+let activeStoryMemory = '';    // story-so-far block passed to LLM
+let sessionPending    = false; // true while scenario screen is open
+
+// ── Story state ───────────────────────────────────────────────────────
+let storyState  = getStoryState();
+let activeStory = getStory(storyState.activeStoryId);
 
 // ── DOM refs ──────────────────────────────────────────────────────────
 
@@ -63,8 +84,91 @@ const personNameInput = document.getElementById('person-name-input');
 const startSessionBtn = document.getElementById('start-session-btn');
 const endSessionBtn   = document.getElementById('end-session-btn');
 const cameraSelect    = document.getElementById('camera-select');
+const charSelect      = document.getElementById('char-select');
+const langSelect      = document.getElementById('lang-select');
+const setupCharSelect = document.getElementById('setup-char-select');
+const setupLangSelect = document.getElementById('setup-lang-select');
 
 // ── Init ──────────────────────────────────────────────────────────────
+
+function populateCharOptions(el) {
+  if (!el) return;
+  el.innerHTML = Object.entries(CHARACTERS)
+    .map(([key, c]) => `<option value="${key}">${c.emoji} ${c.name}</option>`)
+    .join('');
+  el.value = activeCharacter;
+}
+
+function populateLangOptions(el) {
+  if (!el) return;
+  el.innerHTML = Object.entries(LANGUAGES)
+    .map(([code, name]) => `<option value="${code}">${name}</option>`)
+    .join('');
+  el.value = activeLanguage;
+}
+
+function initCharacterSelect() {
+  populateCharOptions(charSelect);
+  charSelect?.addEventListener('change', () => {
+    activeCharacter = charSelect.value;
+    localStorage.setItem('characterKey', activeCharacter);
+    if (setupCharSelect) setupCharSelect.value = activeCharacter;
+  });
+}
+
+function initLanguageSelect() {
+  populateLangOptions(langSelect);
+  langSelect?.addEventListener('change', () => {
+    activeLanguage = langSelect.value;
+    localStorage.setItem('language', activeLanguage);
+    if (setupLangSelect) setupLangSelect.value = activeLanguage;
+  });
+}
+
+function openSetupModal() {
+  const modal = document.getElementById('player-setup-modal');
+  const nameInput = document.getElementById('player-setup-input');
+  populateCharOptions(setupCharSelect);
+  populateLangOptions(setupLangSelect);
+  nameInput.value = playerName;
+  modal.classList.remove('hidden');
+  nameInput.focus();
+}
+
+function initHomepage() {
+  const hp        = document.getElementById('homepage');
+  const nameInput = document.getElementById('hp-name');
+  const hpChar    = document.getElementById('hp-char');
+  const hpLang    = document.getElementById('hp-lang');
+  const startBtn  = document.getElementById('hp-start');
+  // Populate selects
+  populateCharOptions(hpChar);
+  populateLangOptions(hpLang);
+
+  // Pre-fill saved values for returning users
+  if (playerName) nameInput.value = playerName;
+  if (hpChar)     hpChar.value    = activeCharacter;
+  if (hpLang)     hpLang.value    = activeLanguage;
+
+  const start = () => {
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); nameInput.style.borderColor = 'var(--accent)'; return; }
+
+    setPlayerName(name);
+    activeCharacter = hpChar?.value || 'default';
+    activeLanguage  = hpLang?.value || '';
+    localStorage.setItem('characterKey', activeCharacter);
+    localStorage.setItem('language', activeLanguage);
+    if (charSelect) charSelect.value = activeCharacter;
+    if (langSelect) langSelect.value = activeLanguage;
+
+    hp.classList.add('fading');
+    setTimeout(() => { hp.style.display = 'none'; }, 560);
+  };
+
+  startBtn.addEventListener('click', start);
+  nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') start(); });
+}
 
 async function init() {
   await db.open();
@@ -73,35 +177,46 @@ async function init() {
   recognition.updateKnownPeople(people);
   updateAffectionMeter(0);
   resetToIdleState();
+  initCharacterSelect();
+  initLanguageSelect();
 
   // Player identity setup
   document.getElementById('player-name-display').textContent = playerName || '—';
-  if (!playerName) {
-    document.getElementById('player-setup-modal').classList.remove('hidden');
-    document.getElementById('player-setup-input').focus();
-  }
+  initHomepage();
 }
 
 init();
 
 // ── Player name setup events ──────────────────────────────────────────
 
-document.getElementById('player-setup-ok').addEventListener('click', () => {
+function finishSetup() {
   const val = document.getElementById('player-setup-input').value.trim();
-  if (!val) return;
+  if (!val) { document.getElementById('player-setup-input').focus(); return; }
+
   setPlayerName(val);
+
+  if (setupCharSelect) {
+    activeCharacter = setupCharSelect.value;
+    localStorage.setItem('characterKey', activeCharacter);
+    if (charSelect) charSelect.value = activeCharacter;
+  }
+  if (setupLangSelect) {
+    activeLanguage = setupLangSelect.value;
+    localStorage.setItem('language', activeLanguage);
+    if (langSelect) langSelect.value = activeLanguage;
+  }
+
   document.getElementById('player-setup-modal').classList.add('hidden');
-});
+}
+
+document.getElementById('player-setup-ok').addEventListener('click', finishSetup);
 
 document.getElementById('player-setup-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') document.getElementById('player-setup-ok').click();
+  if (e.key === 'Enter') finishSetup();
 });
 
 document.getElementById('player-name-display').addEventListener('click', () => {
-  const input = document.getElementById('player-setup-input');
-  input.value = playerName;
-  document.getElementById('player-setup-modal').classList.remove('hidden');
-  input.focus();
+  openSetupModal();
 });
 
 // ── Recognition Loop ──────────────────────────────────────────────────
@@ -117,8 +232,8 @@ async function recognitionLoop() {
     const conversationView = document.getElementById('view-conversation');
     const isConversationViewActive = conversationView && !conversationView.classList.contains('view-hidden');
 
-    // Skip if already in a session, models not loaded, or NOT on the conversation tab
-    if (currentPerson || !recognition.isLoaded || !isConversationViewActive) {
+    // Skip if already in a session, scenario screen is open, models not loaded, or NOT on the conversation tab
+    if (currentPerson || sessionPending || !recognition.isLoaded || !isConversationViewActive) {
       await new Promise(r => setTimeout(r, 1000));
       continue;
     }
@@ -257,38 +372,159 @@ function toTitleCase(str) {
   return str.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
 }
 
+function showScenarioScreen(person, autoRecognized, onBegin) {
+  sessionPending = true;
+
+  // Get next story chapter and record character assignment
+  const storyProgress = getStoryProgress(storyState, activeStory.id);
+  const chapter       = getNextChapter(activeStory, storyProgress);
+  if (!chapter) {
+    // Story complete — fall back to idle
+    sessionPending = false;
+    setHint('Story complete. All chapters finished.');
+    return;
+  }
+
+  // Link this real person to the story character for this chapter
+  if (chapter.character) {
+    storyState = assignCharacter(storyState, activeStory.id, chapter.character, person.id);
+  }
+
+  const filledChapter = fillChapter(chapter, playerName);
+  activeScenario = {
+    id:         chapter.id,
+    title:      chapter.title,
+    character:  chapter.character,
+    chapterIndex: chapter.index,
+    setup:      filledChapter.setup,
+    playerRole: filledChapter.playerRole,
+    friendRole: filledChapter.friendRole,
+    llmContext: filledChapter.llmContext,
+  };
+
+  const castMember = chapter.character ? getCharacter(activeStory, chapter.character) : null;
+  const totalChapters = activeStory.chapters.length;
+  const chapterNum    = chapter.index + 1;
+
+  const screen       = document.getElementById('scenario-screen');
+  const eyebrowEl    = document.getElementById('scenario-eyebrow');
+  const titleEl      = document.getElementById('scenario-title');
+  const charLabelEl  = document.getElementById('scenario-char-label');
+  const textEl       = document.getElementById('scenario-text');
+  const rolesEl      = document.getElementById('scenario-roles');
+  const playerRoleEl = document.getElementById('scenario-role-player');
+  const friendRoleEl = document.getElementById('scenario-role-friend');
+  const beginBtn     = document.getElementById('scenario-begin-btn');
+
+  if (eyebrowEl)   eyebrowEl.textContent   = `chapter ${chapterNum} of ${totalChapters}`;
+  titleEl.textContent      = chapter.title;
+  if (charLabelEl) charLabelEl.textContent = castMember ? `— ${castMember.name} —` : '';
+  textEl.textContent       = '';
+  playerRoleEl.textContent = filledChapter.playerRole;
+  friendRoleEl.textContent = filledChapter.friendRole;
+  rolesEl.classList.add('hidden');
+  screen.classList.remove('hidden');
+
+  // Build story-so-far prefix then typewriter the setup
+  const storyMemoryBlock = buildStoryMemory(activeStory, storyProgress);
+  const fullText = chapter.setup;
+  let i = 0;
+  const SPEED = 22;
+
+  function type() {
+    if (i < fullText.length) {
+      textEl.textContent += fullText[i++];
+      setTimeout(type, SPEED);
+    } else {
+      rolesEl.classList.remove('hidden');
+    }
+  }
+  type();
+
+  textEl.addEventListener('click', () => {
+    i = fullText.length;
+    textEl.textContent = fullText;
+    rolesEl.classList.remove('hidden');
+  }, { once: true });
+
+  beginBtn.onclick = () => {
+    sessionPending = false;
+    screen.classList.add('hidden');
+    onBegin(storyMemoryBlock);
+  };
+}
+
+// ── Scene peek ────────────────────────────────────────────────────────
+
+function peekScenario() {
+  if (!activeScenario) return;
+
+  const screen       = document.getElementById('scenario-screen');
+  const eyebrowEl    = document.getElementById('scenario-eyebrow');
+  const titleEl      = document.getElementById('scenario-title');
+  const charLabelEl  = document.getElementById('scenario-char-label');
+  const textEl       = document.getElementById('scenario-text');
+  const rolesEl      = document.getElementById('scenario-roles');
+  const playerRoleEl = document.getElementById('scenario-role-player');
+  const friendRoleEl = document.getElementById('scenario-role-friend');
+  const beginBtn     = document.getElementById('scenario-begin-btn');
+  const closeBtn     = document.getElementById('scenario-peek-close');
+
+  // Repopulate from activeScenario (already filled, no typewriter needed)
+  const castMember  = activeScenario.character ? getCharacter(activeStory, activeScenario.character) : null;
+  const chapterNum  = (activeScenario.chapterIndex ?? 0) + 1;
+  if (eyebrowEl)   eyebrowEl.textContent   = `chapter ${chapterNum} of ${activeStory.chapters.length}`;
+  titleEl.textContent      = activeScenario.title;
+  if (charLabelEl) charLabelEl.textContent = castMember ? `— ${castMember.name} —` : '';
+  textEl.textContent       = activeScenario.setup;
+  playerRoleEl.textContent = activeScenario.playerRole;
+  friendRoleEl.textContent = activeScenario.friendRole;
+  rolesEl.classList.remove('hidden');
+
+  beginBtn.classList.add('hidden');
+  if (closeBtn) closeBtn.classList.remove('hidden');
+
+  screen.classList.add('peek-mode');
+  screen.classList.remove('hidden');
+}
+
+function closePeek() {
+  const screen   = document.getElementById('scenario-screen');
+  const beginBtn = document.getElementById('scenario-begin-btn');
+  const closeBtn = document.getElementById('scenario-peek-close');
+  screen.classList.add('hidden');
+  screen.classList.remove('peek-mode');
+  beginBtn.classList.remove('hidden');
+  if (closeBtn) closeBtn.classList.add('hidden');
+}
+
+document.getElementById('scene-peek-btn')?.addEventListener('click', peekScenario);
+document.getElementById('scenario-peek-close')?.addEventListener('click', closePeek);
+
 async function startSession(person, autoRecognized = false) {
-  currentPerson   = person;
-  sessionStart    = new Date().toISOString();
-  history         = [];
-  affection.total = 0;
+  showScenarioScreen(person, autoRecognized, async (storyMemory) => {
+    currentPerson        = person;
+    sessionStart         = new Date().toISOString();
+    history              = [];
+    affection.total      = 0;
+    activeStoryMemory    = storyMemory || '';
 
-  console.log(`Starting session with: ${person.name} (Auto: ${autoRecognized})`);
+    await rag.loadFromDB(db, person.id);
 
-  // Load all past memories for this person (cross-session RAG)
-  await rag.loadFromDB(db, person.id);
+    renderHistory(history);
+    updateAffectionMeter(0);
+    showSessionBar(person.name);
+    sprite.setExpression('neutral');
 
-  renderHistory(history);
-  updateAffectionMeter(0);
-  showSessionBar(person.name);
-  
-  if (autoRecognized) {
-    setHint(`Hello, ${person.name}! (Not you? End session to switch)`);
-  } else {
-    setHint(`Hello, ${person.name}!`);
-  }
+    const castMember = activeScenario?.character
+      ? getCharacter(activeStory, activeScenario.character)
+      : null;
+    setHint(autoRecognized
+      ? `${person.name} detected — ${activeScenario?.title || 'chapter'}`
+      : `Chapter ${(activeScenario?.chapterIndex ?? 0) + 1}: ${activeScenario?.title || ''}`);
 
-  // Refresh graph if we are on that tab to show the active highlight
-  const networkTab = document.querySelector('.nav-tab[data-view="network"]');
-  if (networkTab && networkTab.classList.contains('active')) {
-    const [people, relationships] = await Promise.all([
-      db.getAllPeople(),
-      db.getAllRelationships(),
-    ]);
-    if (graph) graph.setData(people, relationships, person.name);
-  }
-  
-  speechInput.focus();
+    speechInput.focus();
+  });
 }
 
 // ── Global History State ──────────────────────────────────────────────
@@ -307,12 +543,23 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
 
+    // Close scenario peek when switching away — it belongs to the conversation context
+    const scenarioScreen = document.getElementById('scenario-screen');
+    if (scenarioScreen && !scenarioScreen.classList.contains('hidden')) {
+      if (scenarioScreen.classList.contains('peek-mode')) {
+        closePeek();
+      } else if (tab.dataset.view !== 'conversation') {
+        // Initial scenario screen showing — hide it when user navigates away
+        scenarioScreen.classList.add('hidden');
+      }
+    }
+
     const view = tab.dataset.view;
     document.getElementById('view-conversation').classList.toggle('view-hidden', view !== 'conversation');
     document.getElementById('view-directory').classList.toggle('view-hidden', view !== 'directory');
     document.getElementById('view-history').classList.toggle('view-hidden', view !== 'history');
     document.getElementById('view-analytics').classList.toggle('view-hidden', view !== 'analytics');
-    document.getElementById('view-network').classList.toggle('view-hidden', view !== 'network');
+    document.getElementById('view-story').classList.toggle('view-hidden', view !== 'story');
 
     if (view === 'directory') {
       const people = await db.getAllPeople();
@@ -339,30 +586,13 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
       renderAnalytics(computeAnalytics(people, allConversations));
     }
 
-    if (view === 'network') {
-      const canvas = document.getElementById('graph-canvas');
-      const emptyEl = document.getElementById('graph-empty');
-      const [people, relationships] = await Promise.all([
-        db.getAllPeople(),
-        db.getAllRelationships(),
-      ]);
-
-      if (!graph) graph = new RelationshipGraph(canvas);
-      
-      // Ensure click handler is ALWAYS set, even if graph was already initialized
-      graph.onNodeClick = (node) => {
-        console.log(`Graph node clicked: ${node.label}`, node.traits);
-        const traits = node.traits || [];
-        if (traits.length > 0) {
-          setHint(`[${node.label}] traits: ${traits.join(', ')}`, true);
-        } else {
-          setHint(`[${node.label}] No specific traits recorded.`, true);
-        }
+    if (view === 'story') {
+      const switchStory = (newStoryId) => {
+        storyState  = setActiveStory(storyState, newStoryId);
+        activeStory = getStory(newStoryId);
+        renderStoryMap(STORIES, storyState, switchStory);
       };
-
-      const hasData = people.length > 0 || relationships.length > 0;
-      emptyEl.classList.toggle('hidden', hasData);
-      if (hasData) graph.setData(people, relationships, currentPerson?.name);
+      renderStoryMap(STORIES, storyState, switchStory);
     }
   });
 });
@@ -477,14 +707,18 @@ async function endCurrentSession(showModal = true) {
   const sessionExchanges  = [...history];
   const sessionPersonName = currentPerson.name;
   const sessionAffection  = affection.total;
+  const sessionScenario   = activeScenario; // capture before state is cleared
 
   try {
     if (history.length > 0) {
       const closenessGain = Math.ceil(history.length * 1.5 + Math.max(0, affection.total * 0.5));
       const newCloseness  = Math.min(100, (currentPerson.closeness || 0) + closenessGain);
-      
+
       console.log('Saving conversation and updating person data...');
-      await db.saveConversation(currentPerson.id, history, affection.total, sessionStart);
+      await db.saveConversation(
+        currentPerson.id, history, affection.total, sessionStart,
+        sessionScenario?.id || null, sessionScenario?.title || null,
+      );
       await db.updatePerson(currentPerson.id, {
         lastSeen:          new Date().toISOString(),
         totalAffection:    currentPerson.totalAffection + affection.total,
@@ -498,11 +732,13 @@ async function endCurrentSession(showModal = true) {
   }
 
   // ALWAYS clear state even if DB failed
-  currentPerson   = null;
-  sessionStart    = null;
-  history         = [];
-  affection.total = 0;
-  pendingOptions  = [];
+  currentPerson        = null;
+  sessionStart         = null;
+  history              = [];
+  affection.total      = 0;
+  pendingOptions       = [];
+  activeStoryMemory    = '';
+  activeScenario       = null;
   rag.clear();
 
   renderHistory([]);
@@ -534,8 +770,34 @@ async function endCurrentSession(showModal = true) {
     console.error('Failed to refresh people list:', err);
   }
 
+  // A chapter requires at least this many exchanges to count as completed.
+  // Below this, the session is saved but the story doesn't advance.
+  const MIN_EXCHANGES = 5;
+
   if (showModal && sessionExchanges.length > 0) {
-    showDebrief(sessionExchanges, sessionPersonName, sessionAffection);
+    const chapterPassed = sessionScenario && sessionExchanges.length >= MIN_EXCHANGES;
+
+    // Show debrief — eval section state depends on whether chapter passed
+    showDebrief(sessionExchanges, sessionPersonName, sessionAffection, sessionScenario, chapterPassed);
+
+    if (chapterPassed) {
+      // Enough engagement — evaluate and complete the chapter
+      const scenarioCtx = `${sessionScenario.llmContext}\nPlayer role: ${sessionScenario.playerRole}`;
+      evaluateSession(sessionExchanges, scenarioCtx, DEFAULT_MODEL)
+        .then(evalResult => {
+          if (evalResult) updateDebriefEval(evalResult);
+          if (evalResult?.overall && sessionScenario.chapterIndex != null) {
+            storyState = completeChapter(
+              storyState,
+              activeStory.id,
+              sessionScenario.chapterIndex,
+              evalResult.overall,
+            );
+          }
+        })
+        .catch(err => console.warn('Scenario eval failed:', err));
+    }
+    // If chapter not passed: story state unchanged — same chapter replays next session
   } else if (showModal) {
     setHint(`Session with ${sessionPersonName} ended.`);
   }
@@ -564,6 +826,66 @@ async function enumerateCameras() {
     cameraSelect.value = prev;
   }
   cameraSelectRow.classList.toggle('hidden', cameras.length === 0);
+}
+
+// ── Story picker overlay ──────────────────────────────────────────────
+
+function showStoryPicker(onConfirm) {
+  const overlay   = document.getElementById('story-pick-overlay');
+  const cardsEl   = document.getElementById('story-pick-cards');
+  const confirmBtn = document.getElementById('story-pick-btn');
+  if (!overlay) { onConfirm(); return; }
+
+  const render = () => {
+    cardsEl.innerHTML = STORIES.map(s => {
+      const active = s.id === storyState.activeStoryId;
+      const color  = s.cast[0]?.color ?? '#a78bfa';
+      const label  = s.players === 1 ? '1 person' : `${s.players} people`;
+      const dots   = s.cast.map(c =>
+        `<span class="story-card-dot" style="background:${c.color}"></span>`
+      ).join('');
+      const sp     = getStoryProgress(storyState, s.id);
+      const done   = sp.completedChapters?.length ?? 0;
+      const total  = s.chapters.length;
+      const pct    = total ? Math.round((done / total) * 100) : 0;
+      return `<button
+        class="story-card${active ? ' active' : ''}"
+        data-sid="${s.id}"
+        style="--card-color:${color}"
+      >
+        <div class="story-card-body">
+          <span class="story-card-count">${label}</span>
+          <span class="story-card-title">${s.title}</span>
+          <span class="story-card-tagline">${s.tagline}</span>
+          <div class="story-card-cast">${dots}</div>
+          <div class="story-card-bar">
+            <div class="story-card-bar-fill" style="width:${pct}%;background:${color}"></div>
+          </div>
+          <span class="story-card-chapters">${done} / ${total} chapters</span>
+        </div>
+      </button>`;
+    }).join('');
+
+    cardsEl.querySelectorAll('[data-sid]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        storyState  = setActiveStory(storyState, btn.dataset.sid);
+        activeStory = getStory(btn.dataset.sid);
+        render();
+      });
+    });
+  };
+
+  render();
+  overlay.classList.remove('hidden');
+
+  confirmBtn.onclick = () => {
+    overlay.classList.add('fading');
+    setTimeout(() => {
+      overlay.classList.add('hidden');
+      overlay.classList.remove('fading');
+      onConfirm();
+    }, 350);
+  };
 }
 
 cameraStartBtn.addEventListener('click', async () => {
@@ -605,16 +927,17 @@ cameraStartBtn.addEventListener('click', async () => {
     await camera.start(cameraFeed, deviceId);
     hideCameraOverlay();
     resetToIdleState();
-    
+
     // Auto-mode: hide the manual person selector once camera is active
     const sel = document.getElementById('person-selector');
     sel.classList.add('hidden');
     sel.style.display = 'none';
-    
-    setHint('Scanning for faces…', true);
 
-    await loadModels();
-    recognitionLoop();
+    showStoryPicker(async () => {
+      setHint('Scanning for faces…', true);
+      await loadModels();
+      recognitionLoop();
+    });
   } catch (err) {
     cameraStartBtn.disabled = false;
     setCameraOverlayHint('Could not start camera: ' + err.message);
@@ -630,7 +953,9 @@ cameraRefreshBtn.addEventListener('click', async () => {
 
 cameraManualBtn.addEventListener('click', () => {
   hideCameraOverlay();
-  showPersonSelector();
+  showStoryPicker(() => {
+    showPersonSelector();
+  });
 });
 
 async function loadModels() {
@@ -671,64 +996,9 @@ async function generate() {
   setStatus('loading');
   clearError();
   setDialogue(said);
+  setNameplate(currentPerson?.name || '—', false);  // back to the other person
+  sprite.setExpression('curious');                   // thinking face while generating
   showShimmer();
-
-  // Extract relationships and discovery immediately in background
-  if (currentPerson) {
-    const model = modelInput.value.trim() || DEFAULT_MODEL;
-    console.log(`Extracting relationships from: "${said}" (Speaker: ${currentPerson.name})`);
-    extractRelationships(said, model, currentPerson.name).then(async found => {
-      let anyNew = false;
-      for (const { name, relationship, traits, category } of found) {
-        // Filter out the current speaker to avoid "Raynard is stubborn" being added as a link to himself
-        if (name === currentPerson.name) {
-          // But still update traits for the current person!
-          if (traits && traits.length > 0) {
-            const newTraits = [...new Set([...(currentPerson.traits || []), ...traits])];
-            await db.updatePerson(currentPerson.id, { traits: newTraits });
-            anyNew = true;
-          }
-          continue;
-        }
-
-        // Hard gate: skip anyone with no stated relationship — prevents fictional
-        // characters, celebrities, and topic-only mentions from entering the graph.
-        if (!relationship) continue;
-
-        let mentionedPerson = await db.getPersonByName(name);
-        if (!mentionedPerson) {
-          console.log(`Discovered NEW person via mention: ${name} (${relationship})`);
-          mentionedPerson = await db.createPerson(name);
-          anyNew = true;
-        }
-
-        // 1. Update traits (adjectives)
-        if (traits && traits.length > 0) {
-          const newTraits = [...new Set([...(mentionedPerson.traits || []), ...traits])];
-          await db.updatePerson(mentionedPerson.id, { traits: newTraits });
-          anyNew = true;
-        }
-
-        // 2. Save relationship edge
-        console.log(`Saving relationship: ${currentPerson.name} -> ${name} (${relationship})`);
-        await db.saveRelationship(currentPerson.id, currentPerson.name, name, relationship, category, said);
-        anyNew = true;
-      }
-
-      if (anyNew) {
-        const people = await db.getAllPeople();
-        populatePersonSelect(people);
-        recognition.updateKnownPeople(people);
-
-        const networkTab = document.querySelector('.nav-tab[data-view="network"]');
-        if (networkTab && networkTab.classList.contains('active')) {
-          console.log(`Refreshing network graph with new data (Active: ${currentPerson?.name})...`);
-          const relationships = await db.getAllRelationships();
-          if (graph) graph.setData(people, relationships, currentPerson?.name);
-        }
-      }
-    });
-  }
 
   try {
     const [memories, relationships] = await Promise.all([
@@ -739,14 +1009,23 @@ async function generate() {
     // Pass the last 5 exchanges from current session as immediate history
     const recentHistory = [...history].slice(0, 5).reverse();
 
+    // Build rich scenario context: story memory + chapter context + player's inner state
+    const scenarioCtx = activeScenario
+      ? `${activeStoryMemory}${activeScenario.llmContext}\nYour inner state going into this conversation: ${activeScenario.playerRole}`
+      : '';
+
     const options = await fetchOptions(
       said, 
-      modelInput.value.trim() || DEFAULT_MODEL, 
+      DEFAULT_MODEL, 
       recentHistory,
       memories, 
       relationships, 
-      playerName
+      playerName,
+      activeCharacter,
+      activeLanguage,
+      scenarioCtx
     );
+
     pendingOptions = options;
     renderChoices(options, handlePick);
     setStatus('');
@@ -775,20 +1054,29 @@ async function handlePick(index, label, text) {
   renderHistory(history);
 
   speechInput.value = '';
-  resetDialogue();
+  // Show chosen response in the textbox with the player's name
+  setDialogue(text);
+  setNameplate(playerName || 'You', true);
   showEmptyChoices('Good choice. Enter what they say next ↑');
   clearError();
   setHint('');
+
+  // Sprite reacts to the response type immediately
+  sprite.setFromLabel(label);
+
   speechInput.focus();
 
   // Persist memory for RAG — fire-and-forget
   if (currentPerson) {
     rag.addAndPersist(entry, db, currentPerson.id);
 
-    // Opponent personality cue extraction — fire-and-forget
-    const model = modelInput.value.trim() || DEFAULT_MODEL;
-    extractOpponentCues(said, model).then(cues => {
-      if (cues) db.saveOpponentObservation(currentPerson.id, said, cues);
+    // Opponent personality cue extraction — fire-and-forget.
+    // Still runs during scenarios because HOW someone speaks (warmth, humor) is
+    // real even in roleplay. Pass isScenario so the prompt stays style-focused.
+    const model = DEFAULT_MODEL;
+    const isScenario = !!activeScenario;
+    extractOpponentCues(said, model, isScenario).then(cues => {
+      if (cues) db.saveOpponentObservation(currentPerson.id, said, cues, isScenario);
     });
   }
 
@@ -811,6 +1099,9 @@ async function handlePick(index, label, text) {
           acc.push((acc.length ? acc[acc.length - 1] : 0) + e.affectionDelta);
         return acc;
       }, []);
+
+    // Refine sprite expression based on actual detected emotion
+    sprite.setFromDetection(result.dominant);
 
     updateAffectionMeter(total, sparkData);
     showScorePopup(result.delta, result.dominant, EXPRESSION_EMOJI);

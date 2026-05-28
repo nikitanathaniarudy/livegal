@@ -137,13 +137,15 @@ export class GalGameDB {
     return this._getAll('conversations');
   }
 
-  saveConversation(personId, exchanges, finalAffection, startedAt) {
+  saveConversation(personId, exchanges, finalAffection, startedAt, scenarioId = null, scenarioTitle = null) {
     return this._add('conversations', {
       personId,
       startedAt,
       endedAt:        new Date().toISOString(),
       exchanges:      [...exchanges],
       finalAffection,
+      scenarioId,
+      scenarioTitle,
     });
   }
 
@@ -167,7 +169,7 @@ export class GalGameDB {
 
   // ── Relationships (network graph) ────────────────────────────────
 
-  saveRelationship(fromPersonId, fromName, toName, relationship, category, context) {
+  saveRelationship(fromPersonId, fromName, toName, relationship, category, context, scenarioId = null) {
     return this._add('relationships', {
       fromPersonId,
       fromName,
@@ -175,6 +177,7 @@ export class GalGameDB {
       relationship,
       category,
       context,
+      scenarioId,
       timestamp: new Date().toISOString(),
     });
   }
@@ -189,11 +192,12 @@ export class GalGameDB {
 
   // ── Opponent observations ────────────────────────────────────────
 
-  saveOpponentObservation(personId, said, cues) {
+  saveOpponentObservation(personId, said, cues, isScenario = false) {
     return this._add('opponentObservations', {
       personId,
       said,
       cues,
+      isScenario, // true = recorded during a roleplay scenario session
       timestamp: new Date().toISOString(),
     });
   }
